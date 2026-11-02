@@ -1,0 +1,162 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  
+  html {
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    @apply bg-gray-50 text-gray-900;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    line-height: 1.2;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white rounded-2xl border border-gray-100 shadow-sm;
+  }
+
+  .card-hover {
+    @apply card transition-all duration-200 hover:shadow-md hover:-translate-y-0.5;
+  }
+
+  .btn-primary {
+    @apply bg-brand-600 text-white px-6 py-3 rounded-xl font-medium
+           transition-all duration-200 hover:bg-brand-700 hover:shadow-md
+           active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed
+           disabled:hover:bg-brand-600 disabled:hover:shadow-none;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-gray-700 border border-gray-200 px-6 py-3 rounded-xl font-medium
+           transition-all duration-200 hover:bg-gray-50 hover:border-gray-300
+           active:scale-95;
+  }
+
+  .btn-ghost {
+    @apply text-gray-600 px-4 py-2 rounded-lg font-medium
+           transition-all duration-200 hover:bg-gray-100 hover:text-gray-900;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-900
+           placeholder-gray-400 transition-all duration-200
+           focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent
+           hover:border-gray-300;
+  }
+
+  .label {
+    @apply block text-sm font-medium text-gray-700 mb-1.5;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-emerald-50 text-emerald-700;
+  }
+
+  .badge-warning {
+    @apply badge bg-amber-50 text-amber-700;
+  }
+
+  .badge-error {
+    @apply badge bg-red-50 text-red-700;
+  }
+
+  .badge-info {
+    @apply badge bg-brand-50 text-brand-700;
+  }
+
+  .badge-neutral {
+    @apply badge bg-gray-100 text-gray-600;
+  }
+
+  .section-title {
+    @apply text-2xl font-bold text-gray-900 mb-1;
+  }
+
+  .section-subtitle {
+    @apply text-gray-500 text-sm;
+  }
+
+  .divider {
+    @apply border-t border-gray-100 my-6;
+  }
+
+  /* Agent status indicators */
+  .agent-card {
+    @apply card p-5 transition-all duration-300;
+  }
+
+  .agent-card.running {
+    @apply border-brand-200 shadow-brand-100 shadow-sm;
+  }
+
+  .agent-card.completed {
+    @apply border-emerald-200;
+  }
+
+  .agent-card.failed {
+    @apply border-red-200;
+  }
+
+  /* Leaflet map container */
+  .leaflet-container {
+    @apply rounded-xl;
+    z-index: 0;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .animate-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+}
+
+/* Loading spinner */
+@keyframes spin-smooth {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  animation: spin-smooth 0.8s linear infinite;
+}
+
+/* Pulse dot for running agent */
+@keyframes pulse-ring {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.2); }
+}
+
+.pulse-dot {
+  animation: pulse-ring 1.5s ease-in-out infinite;
+}

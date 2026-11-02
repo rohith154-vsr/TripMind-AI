@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic-settings
+sqlalchemy
+aiosqlite
+httpx
+python-dotenv
+google-generativeai
+openai
+python-multipart
+sse-starlette
