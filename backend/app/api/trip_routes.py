@@ -19,34 +19,37 @@ from app.agents import coordinator
 router = APIRouter(prefix="/api/trips", tags=["trips"])
 
 
-async def _run_orchestration(trip_id: str, preferences: dict, db_session_factory):
-    """Background task to run the full agent orchestration."""
+async def _run_orchestration(trip_id: str, preferences: dict, db_session_factory=None):
+    """Background task to run the full agent orchestration with clean isolated sessions."""
     from app.database import AsyncSessionLocal
+    
+    # 1. Mark as running
     async with AsyncSessionLocal() as db:
-        # Update trip status to running
         result = await db.execute(select(Trip).where(Trip.id == trip_id))
         trip = result.scalar_one_or_none()
         if not trip:
             return
-
         trip.status = "running"
         await db.commit()
 
-        try:
-            final_plan = await coordinator.orchestrate(preferences, trip_id, db)
+    # 2. Run orchestration without holding a long session
+    try:
+        final_plan = await coordinator.orchestrate(preferences, trip_id)
 
-            # Save result
+        # 3. Save completed result
+        async with AsyncSessionLocal() as db:
             result = await db.execute(select(Trip).where(Trip.id == trip_id))
             trip = result.scalar_one_or_none()
             if trip:
                 trip.status = "completed"
                 trip.result_json = json.dumps(final_plan)
-                # Update title from coordinator output
                 coord = final_plan.get("coordinator", {})
                 trip.title = coord.get("trip_title", trip.title)
                 await db.commit()
 
-        except Exception as e:
+    except Exception as e:
+        # 4. Mark as failed if anything went wrong
+        async with AsyncSessionLocal() as db:
             result = await db.execute(select(Trip).where(Trip.id == trip_id))
             trip = result.scalar_one_or_none()
             if trip:

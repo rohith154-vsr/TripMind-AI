@@ -9,6 +9,7 @@ TripMind AI deploys six specialized AI agents that work concurrently to research
 ## ✨ Features
 
 - **6 Specialized AI Agents** running concurrently via Python asyncio
+- **Intelligent Offline Fallback Generator** — instant out-of-the-box demonstration even without API keys
 - **Real-time Agent Dashboard** with live execution status updates
 - **Open-Meteo Integration** — actual weather forecasts, no API key required
 - **OpenStreetMap POI Discovery** — real restaurants and attractions via Overpass API
@@ -83,30 +84,51 @@ Travel Coordinator Agent (orchestrator)
 
 ---
 
-## 🚀 Installation
+## 🚀 Installation & Quickstart
 
-### Prerequisites
+### Option 1: Quickstart (Windows / Mac / Linux)
+
+Run both Backend and Frontend with a single command:
+
+**Windows:**
+```bat
+run_all.bat
+```
+
+**Linux / macOS:**
+```bash
+chmod +x run_all.sh
+./run_all.sh
+```
+
+---
+
+### Option 2: Manual Setup
+
+#### Prerequisites
 - Python 3.10+
 - Node.js 18+
-- A Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey)
+- (Optional) Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey) — *app works out of the box with intelligent fallback if omitted*
 
-### Backend Setup
+#### Backend Setup
 
 ```bash
 cd backend
 
-# Copy and edit environment variables
+# Copy environment template
 cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY
 
 # Install Python dependencies
 pip install -r requirements.txt
+
+# Run automated tests
+python -m pytest tests -v
 
 # Start the backend server
 uvicorn app.main:app --reload --port 8000
 ```
 
-### Frontend Setup
+#### Frontend Setup
 
 ```bash
 cd frontend
@@ -156,32 +178,40 @@ TripMind-AI/
 │   │   │   ├── budget_agent.py
 │   │   │   └── itinerary_agent.py
 │   │   ├── services/
-│   │   │   ├── llm_service.py    # Gemini/OpenAI abstraction
-│   │   │   ├── weather_service.py # Open-Meteo
-│   │   │   ├── maps_service.py   # OSM Nominatim + Overpass
-│   │   │   └── currency_service.py # Frankfurter
+│   │   │   ├── llm_service.py        # Gemini/OpenAI abstraction
+│   │   │   ├── fallback_generator.py # Offline domain intelligence
+│   │   │   ├── weather_service.py    # Open-Meteo
+│   │   │   ├── maps_service.py       # OSM Nominatim + Overpass
+│   │   │   └── currency_service.py   # Frankfurter
 │   │   ├── models/trip.py        # SQLAlchemy ORM
-│   │   ├── schemas/trip_schema.py # Pydantic
+│   │   ├── schemas/trip_schema.py # Pydantic v2
 │   │   └── api/
 │   │       ├── trip_routes.py
 │   │       └── agent_routes.py
+│   ├── tests/
+│   │   ├── test_agents.py        # Agent unit tests
+│   │   ├── test_services.py      # Services & fallback tests
+│   │   └── test_api.py           # FastAPI integration tests
 │   ├── requirements.txt
 │   └── .env.example
-└── frontend/
-    ├── src/
-    │   ├── pages/
-    │   │   ├── LandingPage.jsx
-    │   │   ├── TripPlannerPage.jsx
-    │   │   ├── AgentDashboardPage.jsx
-    │   │   ├── ResultsDashboardPage.jsx
-    │   │   └── SavedTripsPage.jsx
-    │   ├── components/
-    │   │   ├── Navbar.jsx
-    │   │   ├── AgentCard.jsx
-    │   │   ├── TripMap.jsx
-    │   │   └── Charts.jsx
-    │   └── services/api.js
-    └── vite.config.js
+├── frontend/
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── LandingPage.jsx
+│   │   │   ├── TripPlannerPage.jsx
+│   │   │   ├── AgentDashboardPage.jsx
+│   │   │   ├── ResultsDashboardPage.jsx
+│   │   │   └── SavedTripsPage.jsx
+│   │   ├── components/
+│   │   │   ├── Navbar.jsx
+│   │   │   ├── AgentCard.jsx
+│   │   │   ├── TripMap.jsx
+│   │   │   └── Charts.jsx
+│   │   └── services/api.js
+│   └── vite.config.js
+├── run_all.bat                   # 1-click launcher (Windows)
+├── run_all.sh                    # 1-click launcher (Linux/Mac)
+└── README.md
 ```
 
 ---

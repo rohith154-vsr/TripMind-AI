@@ -1,23 +1,34 @@
 """
-LLM Service — supports Gemini and OpenAI as providers.
-All agents call this service for AI reasoning.
+LLM Service — supports Gemini and OpenAI as providers, with built-in intelligent
+fallback travel generation for maximum resilience, portfolio demonstration, and testing.
 """
 import json
 import re
 import asyncio
+import logging
 from typing import Any, Dict, Optional
 from app.config import get_settings
+from app.services.fallback_generator import generate_fallback_for_prompt
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
 def _clean_json(text: str) -> str:
     """Strip markdown code fences and whitespace from LLM output."""
     text = text.strip()
-    # Remove ```json ... ``` or ``` ... ```
     text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
     text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE)
     return text.strip()
+
+
+def _is_api_key_configured(key: str) -> bool:
+    if not key or not key.strip():
+        return False
+    lower = key.strip().lower()
+    if "your_" in lower or "_here" in lower or "placeholder" in lower:
+        return False
+    return True
 
 
 class LLMService:
@@ -42,25 +53,46 @@ class LLMService:
     async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """Generate a text response from the configured LLM provider."""
         if self.provider == "gemini":
+            if not _is_api_key_configured(settings.GEMINI_API_KEY):
+                raise ValueError("GEMINI_API_KEY is not configured")
             return await self._generate_gemini(prompt, system_prompt)
         elif self.provider == "openai":
+            if not _is_api_key_configured(settings.OPENAI_API_KEY):
+                raise ValueError("OPENAI_API_KEY is not configured")
             return await self._generate_openai(prompt, system_prompt)
         else:
             raise ValueError(f"Unsupported AI provider: {self.provider}")
 
     async def generate_json(self, prompt: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
-        """Generate a JSON response and parse it."""
+        """
+        Generate a JSON response and parse it.
+        If the external AI provider is unavailable, unconfigured, or encounters an error,
+        it automatically falls back to the intelligent domain-specific travel generator.
+        """
+        # Check if API key is configured
+        api_configured = (
+            (self.provider == "gemini" and _is_api_key_configured(settings.GEMINI_API_KEY)) or
+            (self.provider == "openai" and _is_api_key_configured(settings.OPENAI_API_KEY))
+        )
+
+        if not api_configured:
+            logger.info("API key unconfigured; using intelligent domain fallback generator.")
+            return generate_fallback_for_prompt(prompt, system_prompt or "")
+
         full_prompt = prompt + "\n\nIMPORTANT: Respond ONLY with valid JSON. No markdown, no explanation, just JSON."
-        raw = await self.generate(full_prompt, system_prompt)
-        cleaned = _clean_json(raw)
         try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError as e:
-            # Try to extract JSON from the response
-            match = re.search(r"\{[\s\S]*\}", cleaned)
-            if match:
-                return json.loads(match.group())
-            raise ValueError(f"Failed to parse LLM JSON response: {e}\nRaw: {cleaned[:500]}")
+            raw = await self.generate(full_prompt, system_prompt)
+            cleaned = _clean_json(raw)
+            try:
+                return json.loads(cleaned)
+            except json.JSONDecodeError:
+                match = re.search(r"\{[\s\S]*\}", cleaned)
+                if match:
+                    return json.loads(match.group())
+                raise ValueError(f"Failed to parse LLM JSON response")
+        except Exception as e:
+            logger.warning(f"External LLM generation failed ({e}); falling back to intelligent travel generator.")
+            return generate_fallback_for_prompt(prompt, system_prompt or "")
 
     async def _generate_gemini(self, prompt: str, system_prompt: Optional[str]) -> str:
         model = self._get_gemini()

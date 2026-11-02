@@ -1,0 +1,1 @@
+# TripMind AI Test Suite

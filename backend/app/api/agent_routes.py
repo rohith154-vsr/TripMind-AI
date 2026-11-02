@@ -90,7 +90,7 @@ async def get_agent_statuses(trip_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/stream/{trip_id}")
-async def stream_agent_status(trip_id: str, db: AsyncSession = Depends(get_db)):
+async def stream_agent_status(trip_id: str):
     """SSE endpoint for live agent status updates."""
     from app.database import AsyncSessionLocal
 

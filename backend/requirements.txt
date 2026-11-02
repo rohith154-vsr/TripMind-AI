@@ -9,3 +9,6 @@ google-generativeai
 openai
 python-multipart
 sse-starlette
+greenlet
+pytest
+pytest-asyncio

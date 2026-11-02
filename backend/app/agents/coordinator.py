@@ -5,7 +5,7 @@ Manages all specialized agents, handles execution, collects results, and synthes
 import asyncio
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Callable, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -33,11 +33,11 @@ User Preferences:
 {preferences}
 
 Agent Outputs Summary:
-- Destination Research: {has_destination} ({'✓ Available' if {has_destination} else '✗ Failed'})
-- Weather Intelligence: {has_weather} ({'✓ Available' if {has_weather} else '✗ Failed'})  
-- Local Discovery: {has_local} ({'✓ Available' if {has_local} else '✗ Failed'})
-- Budget Management: {has_budget} ({'✓ Available' if {has_budget} else '✗ Failed'})
-- Itinerary Planning: {has_itinerary} ({'✓ Available' if {has_itinerary} else '✗ Failed'})
+- Destination Research: {has_destination}
+- Weather Intelligence: {has_weather}
+- Local Discovery: {has_local}
+- Budget Management: {has_budget}
+- Itinerary Planning: {has_itinerary}
 
 Create a final coordinated travel plan as JSON:
 {{
@@ -107,58 +107,58 @@ AGENT_CONFIGS = [
 
 
 async def _update_agent_status(
-    db: AsyncSession,
     trip_id: str,
     agent_name: str,
     status: str,
     message: str = "",
     result: dict = None,
 ):
-    """Update agent status in database."""
-    result_obj = await db.execute(
-        select(AgentStatus).where(
-            AgentStatus.trip_id == trip_id,
-            AgentStatus.agent_name == agent_name,
+    """Update agent status in database using an isolated short-lived session."""
+    from app.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        result_obj = await db.execute(
+            select(AgentStatus).where(
+                AgentStatus.trip_id == trip_id,
+                AgentStatus.agent_name == agent_name,
+            )
         )
-    )
-    agent_status = result_obj.scalar_one_or_none()
+        agent_status = result_obj.scalar_one_or_none()
 
-    now = datetime.utcnow()
-    if agent_status:
-        agent_status.status = status
-        agent_status.message = message
-        if status == "running" and not agent_status.started_at:
-            agent_status.started_at = now
-        if status in ("completed", "failed"):
-            agent_status.completed_at = now
-        if result:
-            agent_status.result_json = json.dumps(result)
-    else:
-        agent_status = AgentStatus(
-            trip_id=trip_id,
-            agent_name=agent_name,
-            status=status,
-            message=message,
-            result_json=json.dumps(result or {}),
-            started_at=now if status == "running" else None,
-            completed_at=now if status in ("completed", "failed") else None,
-        )
-        db.add(agent_status)
+        now = datetime.now(timezone.utc)
+        if agent_status:
+            agent_status.status = status
+            agent_status.message = message
+            if status == "running" and not agent_status.started_at:
+                agent_status.started_at = now
+            if status in ("completed", "failed"):
+                agent_status.completed_at = now
+            if result is not None:
+                agent_status.result_json = json.dumps(result)
+        else:
+            agent_status = AgentStatus(
+                trip_id=trip_id,
+                agent_name=agent_name,
+                status=status,
+                message=message,
+                result_json=json.dumps(result or {}),
+                started_at=now if status == "running" else None,
+                completed_at=now if status in ("completed", "failed") else None,
+            )
+            db.add(agent_status)
 
-    await db.commit()
+        await db.commit()
 
 
 async def _run_agent_safe(
     config: dict,
     preferences: dict,
     trip_id: str,
-    db: AsyncSession,
     extra_kwargs: dict = None,
 ) -> Dict[str, Any]:
     """Run a single agent with error handling and status updates."""
     name = config["name"]
     try:
-        await _update_agent_status(db, trip_id, name, "running", config["description"])
+        await _update_agent_status(trip_id, name, "running", config["description"])
 
         kwargs = {"preferences": preferences}
         if extra_kwargs:
@@ -169,19 +169,19 @@ async def _run_agent_safe(
         else:
             result = await config["module"].run(preferences)
 
-        await _update_agent_status(db, trip_id, name, "completed", "Completed successfully", result)
+        await _update_agent_status(trip_id, name, "completed", "Completed successfully", result)
         return result
     except Exception as e:
         error_msg = f"Agent failed: {str(e)}"
         error_result = {"error": error_msg, "agent": name}
-        await _update_agent_status(db, trip_id, name, "failed", error_msg, error_result)
+        await _update_agent_status(trip_id, name, "failed", error_msg, error_result)
         return error_result
 
 
 async def orchestrate(
     preferences: Dict[str, Any],
     trip_id: str,
-    db: AsyncSession,
+    db: AsyncSession = None,
 ) -> Dict[str, Any]:
     """
     Main orchestration workflow:
@@ -194,13 +194,13 @@ async def orchestrate(
     # Step 1: Initialize all agent statuses
     all_agent_names = [c["name"] for c in AGENT_CONFIGS] + ["itinerary_planning", "travel_coordinator"]
     for name in all_agent_names:
-        await _update_agent_status(db, trip_id, name, "waiting", "Waiting to start")
+        await _update_agent_status(trip_id, name, "waiting", "Waiting to start")
 
     # Step 2: Run first 4 agents concurrently
-    await _update_agent_status(db, trip_id, "travel_coordinator", "running", "Orchestrating agent execution")
+    await _update_agent_status(trip_id, "travel_coordinator", "running", "Orchestrating agent execution")
 
     tasks = [
-        _run_agent_safe(config, preferences, trip_id, db)
+        _run_agent_safe(config, preferences, trip_id)
         for config in AGENT_CONFIGS
     ]
     results_list = await asyncio.gather(*tasks, return_exceptions=False)
@@ -217,22 +217,22 @@ async def orchestrate(
         "description": "Creating your day-by-day itinerary",
         "module": itinerary_agent,
     }
-    await _update_agent_status(db, trip_id, "itinerary_planning", "running", "Creating day-by-day itinerary")
+    await _update_agent_status(trip_id, "itinerary_planning", "running", "Creating day-by-day itinerary")
     try:
         itinerary_result = await itinerary_agent.run(
             preferences=preferences,
             agent_outputs=agent_outputs,
         )
-        await _update_agent_status(db, trip_id, "itinerary_planning", "completed", "Itinerary created", itinerary_result)
+        await _update_agent_status(trip_id, "itinerary_planning", "completed", "Itinerary created", itinerary_result)
         agent_outputs["itinerary_planning"] = itinerary_result
     except Exception as e:
         error_msg = f"Itinerary agent failed: {str(e)}"
         itinerary_result = {"error": error_msg}
-        await _update_agent_status(db, trip_id, "itinerary_planning", "failed", error_msg, itinerary_result)
+        await _update_agent_status(trip_id, "itinerary_planning", "failed", error_msg, itinerary_result)
         agent_outputs["itinerary_planning"] = itinerary_result
 
     # Step 4: Coordinator synthesizes
-    await _update_agent_status(db, trip_id, "travel_coordinator", "running", "Synthesizing final travel plan")
+    await _update_agent_status(trip_id, "travel_coordinator", "running", "Synthesizing final travel plan")
 
     agents_successful = sum(1 for v in agent_outputs.values() if "error" not in v)
     agents_failed = len(agent_outputs) - agents_successful
@@ -265,7 +265,7 @@ async def orchestrate(
             },
         }
 
-    await _update_agent_status(db, trip_id, "travel_coordinator", "completed", "Travel plan synthesized", coordinator_result)
+    await _update_agent_status(trip_id, "travel_coordinator", "completed", "Travel plan synthesized", coordinator_result)
 
     # Step 5: Assemble final plan
     final_plan = {
@@ -275,7 +275,7 @@ async def orchestrate(
         "local_discovery": agent_outputs.get("local_discovery", {}),
         "budget_management": agent_outputs.get("budget_management", {}),
         "itinerary_planning": agent_outputs.get("itinerary_planning", {}),
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "preferences": preferences,
     }
 
