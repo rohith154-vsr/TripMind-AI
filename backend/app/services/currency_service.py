@@ -12,9 +12,10 @@ settings = get_settings()
 
 FRANKFURTER_URL = "https://api.frankfurter.dev/v1"
 
-# In-memory cache: (from_curr, to_curr) -> (rate, timestamp)
-_RATE_CACHE: Dict[Tuple[str, str], Tuple[float, float]] = {}
-CACHE_TTL_SECONDS = 3600  # 1 hour
+# In-memory cache: (from_curr, to_curr) -> (rate, is_live_rate, source_label, timestamp)
+_RATE_CACHE: Dict[Tuple[str, str], Tuple[float, bool, str, float]] = {}
+CACHE_TTL_SECONDS = 3600  # 1 hour for live rates
+CACHE_TTL_FALLBACK = 300   # 5 minutes for fallback estimates
 
 # Static fallback exchange rates relative to 1 USD for graceful degradation
 # Note: These are strictly labeled as estimated fallback rates, never as live rates.
@@ -50,15 +51,18 @@ async def get_exchange_rate_with_metadata(from_currency: str, to_currency: str) 
 
     # Check cache first
     if cache_key in _RATE_CACHE:
-        rate, timestamp = _RATE_CACHE[cache_key]
-        if now - timestamp < CACHE_TTL_SECONDS:
-            return rate, True, "Frankfurter API (Cached)"
+        rate, is_live, source, timestamp = _RATE_CACHE[cache_key]
+        ttl = CACHE_TTL_SECONDS if is_live else CACHE_TTL_FALLBACK
+        if now - timestamp < ttl:
+            cached_source = f"{source} (Cached)" if "Cached" not in source else source
+            return rate, is_live, cached_source
 
-    # Try live Frankfurter API
+    # Try live Frankfurter API with responsive timeout
+    http_timeout = min(float(settings.HTTP_TIMEOUT), 5.0)
     try:
         url = f"{FRANKFURTER_URL}/latest"
         params = {"from": from_curr, "to": to_curr}
-        async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=http_timeout, follow_redirects=True) as client:
             resp = await client.get(url, params=params)
             if resp.status_code == 200:
                 data = resp.json()
@@ -66,8 +70,9 @@ async def get_exchange_rate_with_metadata(from_currency: str, to_currency: str) 
                 rate = rates.get(to_curr)
                 if rate is not None:
                     rate_val = float(rate)
-                    _RATE_CACHE[cache_key] = (rate_val, now)
-                    return rate_val, True, "Frankfurter API (Live)"
+                    source_label = "Frankfurter API (Live)"
+                    _RATE_CACHE[cache_key] = (rate_val, True, source_label, now)
+                    return rate_val, True, source_label
     except Exception:
         # Network or timeout failure, proceed to estimated fallback
         pass
@@ -77,7 +82,9 @@ async def get_exchange_rate_with_metadata(from_currency: str, to_currency: str) 
         usd_to_from = ESTIMATED_USD_RATES[from_curr]
         usd_to_to = ESTIMATED_USD_RATES[to_curr]
         est_rate = round(usd_to_to / usd_to_from, 4)
-        return est_rate, False, "Estimated Fallback Rate (Frankfurter API unavailable)"
+        source_label = "Estimated Fallback Rate (Frankfurter API unavailable)"
+        _RATE_CACHE[cache_key] = (est_rate, False, source_label, now)
+        return est_rate, False, source_label
 
     return None, False, "Exchange rate unavailable"
 
@@ -113,8 +120,9 @@ async def convert_amount(amount: float, from_currency: str, to_currency: str) ->
 
 async def get_supported_currencies() -> Dict[str, str]:
     """Return a dict of supported currency codes -> names."""
+    http_timeout = min(float(settings.HTTP_TIMEOUT), 5.0)
     try:
-        async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=http_timeout, follow_redirects=True) as client:
             resp = await client.get(f"{FRANKFURTER_URL}/currencies")
             if resp.status_code == 200:
                 return resp.json()

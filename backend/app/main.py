@@ -26,13 +26,25 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# CORS configuration
+cors_kwargs = {
+    "allow_origins": settings.cors_origins_list,
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+
+# If wildcard is present in origins, disable allow_credentials to avoid browser CORS errors
+if "*" in settings.cors_origins_list:
+    cors_kwargs["allow_credentials"] = False
+
+# Support regex matching for preview deployments (e.g. Vercel preview URLs) if configured
+if settings.CORS_ORIGIN_REGEX:
+    cors_kwargs["allow_origin_regex"] = settings.CORS_ORIGIN_REGEX
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    **cors_kwargs,
 )
 
 # Routes

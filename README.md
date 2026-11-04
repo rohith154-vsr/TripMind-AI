@@ -289,6 +289,7 @@ TripMind-AI/
 │   └── .env.example
 ├── docs/
 │   ├── ARCHITECTURE.md
+│   ├── DEPLOYMENT.md
 │   └── screenshots/
 │       ├── 01-landing-page.png
 │       ├── 02-trip-planner.png
@@ -310,7 +311,7 @@ TripMind-AI/
 └── README.md
 ~~~
 
-For a more detailed system view, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+For a more detailed system view, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). For production deployment on Vercel, Render, and Neon, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Screenshots
 

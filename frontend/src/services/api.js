@@ -1,7 +1,22 @@
 import axios from 'axios'
 
+/**
+ * Resolves the backend API base URL:
+ * - In local development: defaults to '/api' (proxied via Vite dev server)
+ * - In production (Vercel): uses import.meta.env.VITE_API_BASE_URL (e.g. Render backend URL)
+ * Automatically normalizes trailing slashes and ensures '/api' suffix.
+ */
+export const getApiBaseUrl = () => {
+  const envUrl = (import.meta.env.VITE_API_BASE_URL || '').trim()
+  if (!envUrl) {
+    return '/api'
+  }
+  const cleanUrl = envUrl.replace(/\/+$/, '')
+  return cleanUrl.endsWith('/api') ? cleanUrl : `${cleanUrl}/api`
+}
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: getApiBaseUrl(),
   timeout: 120000,
   headers: {
     'Content-Type': 'application/json',
@@ -32,7 +47,7 @@ export const tripApi = {
 
 export const agentApi = {
   getStatus: (tripId) => api.get(`/agents/status/${tripId}`),
-  streamUrl: (tripId) => `/api/agents/stream/${tripId}`,
+  streamUrl: (tripId) => `${getApiBaseUrl()}/agents/stream/${tripId}`,
 }
 
 export const healthApi = {

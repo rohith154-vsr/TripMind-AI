@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     DATABASE_URL: str = "sqlite+aiosqlite:///./tripmind.db"
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    CORS_ORIGIN_REGEX: str = ""
     GEMINI_MODEL: str = "gemini-3.5-flash-lite"
     OPENAI_MODEL: str = "gpt-4o-mini"
     LLM_TIMEOUT: int = 90
@@ -26,7 +27,8 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> List[str]:
-        return [o.strip() for o in self.CORS_ORIGINS.split(",")]
+        origins = [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+        return origins if origins else ["http://localhost:5173", "http://localhost:3000"]
 
 
 @lru_cache()
