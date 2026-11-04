@@ -85,7 +85,7 @@ export default function AgentDashboardPage() {
           </h1>
           <p className="text-gray-500 text-sm">
             {tripStatus === 'completed'
-              ? 'Redirecting you to your itinerary…'
+              ? "Review each agent's execution, data sources, and provenance below, then explore your comprehensive itinerary."
               : tripStatus === 'failed'
               ? 'Your plan was partially generated.'
               : 'Sit tight while your specialized travel team prepares your plan.'}

@@ -34,7 +34,7 @@ flowchart TD
     Persist --> Response[Results Dashboard]
 ~~~
 
-The coordinator owns the workflow. Independent research tasks can run concurrently. Itinerary planning uses the collected research and planning outputs, and the coordinator synthesizes the completed result.
+The coordinator owns the workflow. Independent research tasks can run concurrently. Itinerary planning uses the collected research and planning outputs, and the coordinator synthesizes the completed result (see [Results Dashboard](screenshots/04-results-dashboard.png)).
 
 ## 3. Agent Responsibilities and Data Sources
 
@@ -58,7 +58,7 @@ Agent metadata communicates how an output was produced:
 | hybrid | Live external data combined with LLM reasoning |
 | fallback | Local fallback logic used because a dependency was unavailable |
 
-The UI should preserve these distinctions. A completed agent status means its task completed; it does not imply every external provider returned live data.
+The UI preserves these distinctions through dedicated badges, timing metrics, and source tags (see [Agent Execution Dashboard](screenshots/03-agent-dashboard.png)). A completed agent status means its task completed; it does not imply every external provider returned live data.
 
 ## 5. External Services
 

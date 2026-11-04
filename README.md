@@ -287,6 +287,14 @@ TripMind-AI/
 │   ├── tests/               # Agent, service, API and integrity tests
 │   ├── requirements.txt
 │   └── .env.example
+├── docs/
+│   ├── ARCHITECTURE.md
+│   └── screenshots/
+│       ├── 01-landing-page.png
+│       ├── 02-trip-planner.png
+│       ├── 03-agent-dashboard.png
+│       ├── 04-results-dashboard.png
+│       └── 05-saved-trips.png
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
@@ -306,15 +314,32 @@ For a more detailed system view, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md
 
 ## Screenshots
 
-Application screenshots should be added to **docs/screenshots/** and linked here once captured from the current running build. Recommended captures:
+Visual walkthrough of TripMind AI captured directly from the running application:
 
-1. Landing page
-2. Trip planner form
-3. Agent execution dashboard with provenance labels
-4. Final results dashboard with itinerary, map and charts
-5. Saved trips page
+### 1. Landing Page
+*Modern, responsive landing interface introducing the multi-agent travel planning platform.*
 
-Only use genuine screenshots of the running application; do not use mockups as evidence of implemented functionality.
+![TripMind AI Landing Page](docs/screenshots/01-landing-page.png)
+
+### 2. Trip Planning Form
+*Input form capturing trip parameters including destination, dates, budget, currency, and travel preferences.*
+
+![Trip Planning Form](docs/screenshots/02-trip-planner.png)
+
+### 3. Agent Execution Dashboard (Live Provenance & Metrics)
+*Real-time orchestrator tracking all 6 specialized agents, displaying execution status, duration, data sources, and transparent provenance badges (AI Reasoning, Live External API, Hybrid, and Fallback).*
+
+![Agent Execution Dashboard](docs/screenshots/03-agent-dashboard.png)
+
+### 4. Comprehensive Results Dashboard
+*Synthesized travel plan featuring Day-by-Day Itinerary, Budget Breakdown (with Recharts visualization & live Frankfurter exchange rate), Weather Forecast (with Recharts chart), Regional Dining Guide, and Leaflet Interactive Map.*
+
+![Results Dashboard](docs/screenshots/04-results-dashboard.png)
+
+### 5. Saved Trips
+*Persistent trip history backed by async SQLite, allowing users to revisit, inspect, or manage previously generated travel plans.*
+
+![Saved Trips Page](docs/screenshots/05-saved-trips.png)
 
 ## Security
 
