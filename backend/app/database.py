@@ -4,6 +4,12 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import DeclarativeBase
 from app.config import get_settings
 
+# Unsupported libpq parameters that asyncpg does not accept in query strings
+UNSUPPORTED_ASYNC_PARAMS = {
+    "channel_binding",
+    "gssencmode",
+}
+
 
 def format_database_url(raw_url: str) -> str:
     """
@@ -13,7 +19,9 @@ def format_database_url(raw_url: str) -> str:
       - postgres:// -> postgresql+asyncpg://
       - postgresql:// -> postgresql+asyncpg://
       - postgresql+psycopg2:// -> postgresql+asyncpg://
-    Translates query parameters like sslmode=require to ssl=require for asyncpg compatibility.
+    Translates query parameters:
+      - Maps sslmode=require to ssl=require for asyncpg compatibility while preserving SSL.
+      - Removes unsupported libpq parameters such as channel_binding.
     """
     if not raw_url:
         return raw_url
@@ -45,8 +53,14 @@ def format_database_url(raw_url: str) -> str:
             query_params["ssl"] = ["require"]
         elif mode in ("verify-ca", "verify-full"):
             query_params["ssl"] = ["verify-full"]
+        elif mode == "disable":
+            query_params["ssl"] = ["disable"]
         else:
             query_params["ssl"] = [mode]
+
+    # Remove unsupported libpq parameters (e.g. channel_binding, gssencmode)
+    for param in UNSUPPORTED_ASYNC_PARAMS:
+        query_params.pop(param, None)
 
     new_query = urllib.parse.urlencode(query_params, doseq=True)
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
@@ -55,8 +69,11 @@ def format_database_url(raw_url: str) -> str:
 def get_engine_args(url: str) -> Tuple[str, Dict[str, Any]]:
     """
     Determine appropriate create_async_engine arguments based on dialect.
-    Only passes SQLite-specific arguments (like check_same_thread) to SQLite.
-    Configures connection pooling and pre-ping for production PostgreSQL.
+    - SQLite: Uses connect_args={"check_same_thread": False} and default pooling.
+    - PostgreSQL (Direct or Pooled):
+      - Configures connection pooling (pool_pre_ping=True, pool_recycle=300).
+      - For Neon PgBouncer pooled connections (containing 'pooler' in host),
+        disables statement_cache_size to prevent transaction pooling collisions.
     """
     normalized_url = format_database_url(url)
     is_sqlite = normalized_url.startswith("sqlite")
@@ -73,6 +90,17 @@ def get_engine_args(url: str) -> Tuple[str, Dict[str, Any]]:
         engine_kwargs["pool_recycle"] = 300
         engine_kwargs["pool_size"] = 10
         engine_kwargs["max_overflow"] = 20
+
+        # Handle Neon connection pooler (PgBouncer)
+        parsed = urllib.parse.urlsplit(normalized_url)
+        connect_args: Dict[str, Any] = {}
+
+        if "pooler" in parsed.netloc:
+            # Disable asyncpg prepared statement caching for PgBouncer transaction mode
+            connect_args["statement_cache_size"] = 0
+
+        if connect_args:
+            engine_kwargs["connect_args"] = connect_args
 
     return normalized_url, engine_kwargs
 

@@ -47,12 +47,16 @@ This guide describes how to deploy TripMind AI into production using:
    - **Project Name:** `tripmind-ai`
    - **Region:** Choose a region geographically close to your Render deployment (e.g., `us-east-2` or `eu-central-1`).
 3. After creation, copy the **Connection string** from the project dashboard.
-   - Choose the **PostgreSQL** dialect (or `Pooled connection` if using high concurrency).
-   - The connection string will look like:
+   - You can choose either **Direct** or **Pooled connection** (PgBouncer):
      ```
-     postgresql://alex:AbC123dEf@ep-cool-fog-123456.us-east-2.aws.neon.tech/neondb?sslmode=require
+     postgresql://alex:AbC123dEf@ep-cool-fog-123456.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require
      ```
-4. **Note on compatibility:** TripMind AI's `backend/app/database.py` automatically detects and translates `postgresql://` and `sslmode=require` into `postgresql+asyncpg://` with `ssl=require`. You do not need to manually modify the connection string.
+4. **Note on compatibility:** TripMind AI's `backend/app/database.py` automatically:
+   - Detects and translates `postgresql://` into `postgresql+asyncpg://`.
+   - Maps `sslmode=require` into `ssl=require`, preserving TLS security.
+   - Strips unsupported libpq query parameters like `channel_binding=require`.
+   - Disables statement caching (`statement_cache_size=0`) when a pooled host (`-pooler`) is used, preventing PgBouncer transaction-mode prepared statement conflicts.
+   You do not need to manually modify or clean the connection string.
 
 ---
 
@@ -202,3 +206,4 @@ Verify the deployed components in this sequence:
 - **Symptom:** `TypeError: connect() got an unexpected keyword argument 'sslmode'`.
 - **Cause:** `asyncpg` uses the `ssl` argument instead of `sslmode`.
 - **Remedy:** TripMind AI's `format_database_url` function intercepts `sslmode=require` and maps it to `ssl=require`, ensuring full compatibility with Neon connection strings.
+
