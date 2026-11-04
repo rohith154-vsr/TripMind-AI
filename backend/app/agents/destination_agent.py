@@ -107,5 +107,16 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     else:
         result["coordinates"] = None
 
+    is_fallback = "Historic Center & Landmark Plaza" in str(result)
+    result["metadata"] = {
+        "agent_name": "destination_research",
+        "display_name": "Destination Research Agent",
+        "responsibility": "Destination research, attraction analysis, and cultural orientation",
+        "source_type": "fallback" if is_fallback else "llm",
+        "data_sources": ["Nominatim Geocoding", "Gemini 3.5 Flash Lite" if not is_fallback else "Curated Knowledge Base"],
+        "is_fallback": is_fallback,
+        "errors": [geo_data["error"]] if (geo_data and "error" in geo_data) else [],
+    }
+
     result["agent"] = "destination_research"
     return result

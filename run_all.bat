@@ -8,3 +8,4 @@ echo Backend running on http://localhost:8000
 echo Frontend running on http://localhost:5173
 echo Press any key to exit this launcher window...
 pause >nul
+

@@ -360,6 +360,22 @@ export default function ResultsDashboardPage() {
               </div>
             </div>
 
+            {/* Currency conversion banner */}
+            {budget.currency_conversion && (
+              <div className="mb-6 p-3.5 bg-gray-50 border border-gray-200 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div>
+                  <span className="text-gray-500">Currency Conversion: </span>
+                  <span className="font-semibold text-gray-800">
+                    1 USD = {budget.currency_conversion.exchange_rate} {budget.currency_conversion.target_currency}
+                  </span>
+                  <span className="text-gray-500 ml-2">({budget.currency_conversion.rate_source})</span>
+                </div>
+                <span className={`badge ${budget.currency_conversion.is_live_rate ? 'badge-success' : 'badge-warning'}`}>
+                  {budget.currency_conversion.is_live_rate ? '✓ Live Frankfurter Rate' : '⚠ Estimated Rate'}
+                </span>
+              </div>
+            )}
+
             <BudgetChart breakdown={budget.expense_breakdown || {}} />
 
             {budget.cost_saving_tips?.length > 0 && (
@@ -436,20 +452,35 @@ export default function ResultsDashboardPage() {
         )}
 
         {/* Local Discovery */}
-        {(local.featured_restaurants?.length > 0 || local.top_attractions?.length > 0) && !local.error && (
+        {!local.error && (local.featured_restaurants?.length > 0 || local.general_dining_suggestions?.length > 0 || local.neighborhood_guides?.length > 0 || local.api_status_message) && (
           <Section id="local" title="Restaurants & Local Gems" icon={UtensilsCrossed} iconColor="text-orange-600">
+            {/* Status & Provenance Message */}
+            {local.api_status_message && (
+              <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-3">
+                <Info className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <div className="font-semibold text-amber-800 mb-0.5">Zero Fabricated Establishments Notice</div>
+                  <div className="leading-relaxed">{local.api_status_message}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Verified OpenStreetMap Restaurants */}
             {local.featured_restaurants?.length > 0 && (
               <div className="mb-6">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Top Restaurants</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-gray-700">Verified Local Restaurants</h3>
+                  <span className="badge badge-success text-[11px]">✓ OpenStreetMap Verified</span>
+                </div>
                 <div className="grid sm:grid-cols-2 gap-3">
-                  {local.featured_restaurants.slice(0, 4).map((r, i) => (
-                    <div key={i} className="p-4 border border-gray-100 rounded-xl">
+                  {local.featured_restaurants.slice(0, 6).map((r, i) => (
+                    <div key={i} className="p-4 border border-gray-100 rounded-xl hover:border-brand-200 transition-colors">
                       <div className="flex items-start justify-between gap-2 mb-1.5">
                         <div className="text-sm font-semibold text-gray-900">{r.name}</div>
                         <span className="badge badge-neutral">{r.price_range || '$$'}</span>
                       </div>
-                      <div className="text-xs text-gray-500 mb-1">{r.cuisine}</div>
-                      <p className="text-xs text-gray-500 leading-relaxed">{r.description}</p>
+                      <div className="text-xs text-brand-600 font-medium mb-1">{r.cuisine || 'Local Cuisine'}</div>
+                      <p className="text-xs text-gray-500 leading-relaxed">{r.description || r.recommendation_reason}</p>
                       {r.opening_hours && (
                         <div className="text-xs text-gray-400 mt-1.5">🕐 {r.opening_hours}</div>
                       )}
@@ -459,8 +490,65 @@ export default function ResultsDashboardPage() {
               </div>
             )}
 
+            {/* General Regional Dining Suggestions */}
+            {local.general_dining_suggestions?.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Regional Culinary & Dining Guide</h3>
+                <div className="space-y-2">
+                  {local.general_dining_suggestions.map((sug, i) => (
+                    <div key={i} className="p-3 bg-orange-50 border border-orange-100 rounded-xl text-xs text-orange-900 flex items-start gap-2.5">
+                      <UtensilsCrossed className="w-3.5 h-3.5 text-orange-600 mt-0.5 flex-shrink-0" />
+                      <span className="leading-relaxed">{sug}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Verified Attractions */}
+            {local.top_attractions?.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Local Points of Interest</h3>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {local.top_attractions.slice(0, 4).map((a, i) => (
+                    <div key={i} className="p-4 border border-gray-100 rounded-xl">
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <div className="text-sm font-semibold text-gray-900">{a.name}</div>
+                        <span className="badge badge-neutral capitalize">{a.type}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 leading-relaxed">{a.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Neighborhood Guides */}
+            {local.neighborhood_guides?.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Neighborhood Guides</h3>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {local.neighborhood_guides.slice(0, 4).map((n, i) => (
+                    <div key={i} className="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                      <div className="text-sm font-semibold text-gray-900 mb-1">{n.name}</div>
+                      <p className="text-xs text-gray-600 mb-2">{n.vibe}</p>
+                      {n.top_spots?.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {n.top_spots.map((spot, sIdx) => (
+                            <span key={sIdx} className="badge bg-white text-gray-700 text-[10px] border border-gray-200">
+                              {spot}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {local.hidden_gems?.length > 0 && (
-              <div>
+              <div className="mb-6">
                 <h3 className="text-sm font-semibold text-gray-700 mb-3">Hidden Gems</h3>
                 <div className="grid sm:grid-cols-2 gap-3">
                   {local.hidden_gems.slice(0, 4).map((gem, i) => (
@@ -474,7 +562,7 @@ export default function ResultsDashboardPage() {
             )}
 
             {local.local_tips?.length > 0 && (
-              <div className="mt-4">
+              <div>
                 <h3 className="text-sm font-semibold text-gray-700 mb-2">Local Tips</h3>
                 <div className="space-y-1.5">
                   {local.local_tips.map((tip, i) => (

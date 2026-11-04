@@ -20,3 +20,4 @@ def sample_preferences():
         "travel_style": "Cultural",
         "interests": ["Historical Places", "Food", "Architecture"],
     }
+

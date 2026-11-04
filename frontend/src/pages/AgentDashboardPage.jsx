@@ -44,8 +44,7 @@ export default function AgentDashboardPage() {
 
         if (data.trip_status === 'completed') {
           clearInterval(pollingRef.current)
-          // Small delay then navigate
-          setTimeout(() => navigate(`/results/${tripId}`), 1500)
+          // Keep completed agent transparency dashboard visible until user clicks 'View My Travel Plan'
         }
         if (data.trip_status === 'failed') {
           clearInterval(pollingRef.current)

@@ -55,3 +55,4 @@ def test_parse_weather():
 async def test_currency_same_currency():
     rate = await get_exchange_rate("USD", "USD")
     assert rate == 1.0
+

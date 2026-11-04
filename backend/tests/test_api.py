@@ -42,3 +42,4 @@ async def test_generate_and_status_flow(sample_preferences):
         trip_res = await client.get(f"/api/trips/{trip_id}")
         assert trip_res.status_code == 200
         assert trip_res.json()["destination"] == sample_preferences["destination"]
+

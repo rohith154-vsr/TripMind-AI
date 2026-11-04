@@ -131,4 +131,22 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     analysis["coordinates"] = coordinates
     analysis["weather_data_available"] = weather_available
     analysis["agent"] = "weather_intelligence"
+
+    sources = []
+    if weather_available:
+        sources.append("Open-Meteo Meteorological API (Live)")
+    if coordinates:
+        sources.append("Nominatim Geocoding")
+    sources.append("Gemini 3.5 Flash Lite")
+
+    analysis["metadata"] = {
+        "agent_name": "weather_intelligence",
+        "display_name": "Weather Intelligence Agent",
+        "responsibility": "Real-time weather forecast retrieval, rain risk analysis, and packing guidance",
+        "source_type": "live_api" if weather_available else "fallback",
+        "data_sources": sources if weather_available else ["Historical Weather Estimates (Open-Meteo Unavailable)"],
+        "is_fallback": not weather_available,
+        "errors": [locals().get('weather_error')] if (not weather_available and locals().get('weather_error')) else [],
+    }
+
     return analysis

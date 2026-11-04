@@ -148,16 +148,20 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     # Get real currency info
     currency_info = ""
     usd_conversion = None
+    currency_data_source = "Budget in base currency (USD)"
     try:
         if currency != "USD":
             conv = await convert_amount(1.0, "USD", currency)
             if conv:
                 usd_conversion = conv
-                currency_info = f"1 USD = {conv['exchange_rate']} {currency} (live rate from Frankfurter API)"
+                rate_status = "live rate" if conv.get("is_live_rate") else "estimated rate"
+                currency_info = f"1 USD = {conv['exchange_rate']} {currency} ({conv['rate_source']} - {rate_status})"
+                currency_data_source = conv['rate_source']
         else:
-            currency_info = "Budget is in USD"
+            currency_info = "Budget is in USD (no conversion required)"
     except Exception as e:
         currency_info = f"Currency conversion unavailable: {str(e)}"
+        currency_data_source = "Currency API error"
 
     interests_str = ", ".join(interests) or "General sightseeing"
     prompt = BUDGET_PROMPT.format(
@@ -193,4 +197,16 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     result["currency_conversion"] = usd_conversion
     result["trip_duration_days"] = duration_days
     result["agent"] = "budget_management"
+
+    is_curr_fallback = bool(usd_conversion and not usd_conversion.get("is_live_rate"))
+    sources = [currency_data_source, "Gemini 3.5 Flash Lite"]
+    result["metadata"] = {
+        "agent_name": "budget_management",
+        "display_name": "Budget Management Agent",
+        "responsibility": "Cost breakdown, daily budget allocation, currency conversions, and saving tips",
+        "source_type": "hybrid",
+        "data_sources": sources,
+        "is_fallback": is_curr_fallback,
+        "errors": [currency_info] if "unavailable" in currency_info.lower() else [],
+    }
     return result

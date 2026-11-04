@@ -1,15 +1,23 @@
 """
 Itinerary Planning Agent
-Creates a detailed day-by-day itinerary using insights from other agents.
+Creates a detailed, geographically optimized day-by-day itinerary
+using verified insights from destination research, weather intelligence,
+budget management, and local discovery agents.
 """
 from typing import Dict, Any, List
 from app.services.llm_service import llm_service
 
 SYSTEM_PROMPT = """You are the Itinerary Planning Agent for TripMind AI.
-Your role is to create detailed, practical, day-by-day travel itineraries.
-Consider geography (group nearby attractions), opening hours, travel time, and traveler preferences.
-Avoid overly packed schedules. Build in rest time and spontaneity.
-Respond with structured JSON only."""
+Your role is to create realistic, geographically coherent, day-by-day travel itineraries.
+STRICT ACCURACY RULES:
+1. Use actual discovered locations from the provided agent outputs.
+2. Geographically cluster activities for each day to minimize transit fatigue.
+3. Never schedule the same attraction more than once across different days.
+4. Adhere strictly to the travel dates and duration.
+5. Avoid claiming specific opening hours unless explicitly confirmed; otherwise note 'Typical hours; verify locally'.
+6. Clearly label estimated travel times between activities (e.g. 'Transit: ~15 mins via metro').
+7. Build in buffer time and avoid impossible or exhausting schedules.
+8. Respond with structured JSON only."""
 
 ITINERARY_PROMPT = """Create a comprehensive day-by-day itinerary for this trip.
 
@@ -46,20 +54,20 @@ Create a detailed itinerary as JSON with this structure:
     {{
       "day_number": 1,
       "date": "YYYY-MM-DD",
-      "theme": "Arrival & First Impressions",
-      "weather_note": "Expected weather and how it affects plans",
+      "theme": "Arrival & Orientation",
+      "weather_note": "Expected weather and outdoor feasibility",
       "morning": {{
         "time": "08:00 - 12:00",
         "activities": [
           {{
-            "time": "08:00",
+            "time": "09:00",
             "name": "Activity name",
             "type": "attraction|restaurant|transport|leisure|shopping",
             "description": "What to do and see",
             "duration_hours": 2,
             "cost_per_person": 15,
-            "location": "Area/neighborhood name",
-            "tips": "Practical tip for this activity",
+            "location": "Neighborhood or specific venue",
+            "tips": "Practical tip (e.g. Transit: ~15 mins via metro. Typical hours; verify locally)",
             "why_recommended": "Why this suits the traveler's style"
           }}
         ]
@@ -73,9 +81,9 @@ Create a detailed itinerary as JSON with this structure:
         "activities": []
       }},
       "meals": {{
-        "breakfast": "Where to have breakfast",
-        "lunch": "Lunch recommendation",
-        "dinner": "Dinner recommendation"
+        "breakfast": "Breakfast recommendation or neighborhood bakery style",
+        "lunch": "Lunch recommendation or local cuisine style",
+        "dinner": "Dinner recommendation or regional dining quarter"
       }},
       "daily_budget_estimate": 150,
       "transportation": "How to get around today",
@@ -85,7 +93,7 @@ Create a detailed itinerary as JSON with this structure:
   "travel_logistics": {{
     "arrival_info": "What to do on arrival day",
     "departure_info": "What to do on departure day",
-    "airport_transport": "How to get from airport to accommodation",
+    "airport_transport": "Transit recommendations between airport/station and accommodation",
     "recommended_accommodation_area": "Where to stay and why"
   }},
   "packing_checklist": ["Item 1", "Item 2"],
@@ -98,9 +106,8 @@ Create a detailed itinerary as JSON with this structure:
   ]
 }}
 
-Create a FULL itinerary for all {duration_days} days. Day 1 is arrival ({departure_date}), last day is departure ({return_date}).
-Keep daily budget within the overall budget. Weather notes should reference actual weather data if available.
-Activities should be geographically clustered where possible."""
+Generate a complete schedule for all {duration_days} days. Day 1 is {departure_date}, last day is {return_date}.
+Never repeat the same attraction on multiple days."""
 
 
 async def run(preferences: Dict[str, Any], agent_outputs: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -122,13 +129,13 @@ async def run(preferences: Dict[str, Any], agent_outputs: Dict[str, Any] = None)
 
     # Extract relevant info from other agents
     agent_outputs = agent_outputs or {}
-    
+
     destination_info = "No destination research available"
     if "destination_research" in agent_outputs:
         dr = agent_outputs["destination_research"]
         if not dr.get("error"):
-            attrs = [a["name"] for a in dr.get("top_attractions", [])[:5]]
-            destination_info = f"Top attractions: {', '.join(attrs)}. {dr.get('destination_overview', {}).get('description', '')[:500]}"
+            attrs = [a["name"] for a in dr.get("top_attractions", [])[:6]]
+            destination_info = f"Top attractions: {', '.join(attrs)}. Overview: {dr.get('destination_overview', {}).get('description', '')[:400]}"
 
     weather_info = "No weather data available"
     if "weather_intelligence" in agent_outputs:
@@ -139,13 +146,16 @@ async def run(preferences: Dict[str, Any], agent_outputs: Dict[str, Any] = None)
                 good_days = [d["date"] for d in wr["daily_forecast"] if d.get("is_good_outdoor")]
                 weather_info += f" Good outdoor days: {', '.join(good_days[:5])}"
 
-    local_info = "No local discovery data available"
+    local_info = "No verified POI discovery available"
     if "local_discovery" in agent_outputs:
         ld = agent_outputs["local_discovery"]
         if not ld.get("error"):
-            restaurants = [r["name"] for r in ld.get("featured_restaurants", [])[:3]]
-            attractions = [a["name"] for a in ld.get("top_attractions", [])[:3]]
-            local_info = f"Top restaurants: {', '.join(restaurants)}. Top local spots: {', '.join(attractions)}"
+            restaurants = [r["name"] for r in ld.get("featured_restaurants", [])[:4]]
+            attractions = [a["name"] for a in ld.get("top_attractions", [])[:4]]
+            if restaurants or attractions:
+                local_info = f"Verified restaurants: {', '.join(restaurants) or 'None'}. Verified spots: {', '.join(attractions) or 'None'}"
+            elif ld.get("general_dining_suggestions"):
+                local_info = f"Regional dining advice: {'; '.join(ld.get('general_dining_suggestions', [])[:2])}"
 
     interests_str = ", ".join(preferences.get("interests", [])) or "General travel"
     prompt = ITINERARY_PROMPT.format(
@@ -172,11 +182,22 @@ async def run(preferences: Dict[str, Any], agent_outputs: Dict[str, Any] = None)
                 "total_days": duration_days,
                 "theme": f"Trip to {destination}",
                 "highlights": [],
-                "tips": f"Itinerary generation failed: {str(e)}",
+                "tips": f"Itinerary generation fallback: {str(e)}",
             },
             "days": [],
         }
 
     result["trip_duration_days"] = duration_days
     result["agent"] = "itinerary_planning"
+
+    is_fallback = "Complete Discovery" in str(result)
+    result["metadata"] = {
+        "agent_name": "itinerary_planning",
+        "display_name": "Itinerary Planning Agent",
+        "responsibility": "Generating geographically grouped, non-repeating day-by-day itinerary with realistic travel pacing",
+        "source_type": "fallback" if is_fallback else "llm",
+        "data_sources": ["Gemini 3.5 Flash Lite", "Synthesized Multi-Agent Intelligence"] if not is_fallback else ["Curated Itinerary Engine (Fallback)"],
+        "is_fallback": is_fallback,
+        "errors": [],
+    }
     return result

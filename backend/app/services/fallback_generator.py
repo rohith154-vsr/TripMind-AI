@@ -335,98 +335,41 @@ def _generate_local_discovery(prompt: str) -> Dict[str, Any]:
         dest = "Destination"
 
     return {
-        "featured_restaurants": [
-            {
-                "name": f"Bistrot Authentique de {dest}",
-                "cuisine": "Traditional Regional",
-                "description": "Beloved local gem serving seasonal, farm-sourced dishes and regional wines in an intimate setting.",
-                "price_range": "$$",
-                "best_for": "dinner",
-                "lat": 0.0,
-                "lon": 0.0,
-                "opening_hours": "12:00-14:30, 19:00-22:30",
-                "recommendation_reason": "Authentic regional culinary experience praised by locals."
-            },
-            {
-                "name": "Café des Arts & Roastery",
-                "cuisine": "Cafe & Brunch",
-                "description": "Charming artisanal espresso bar and patisserie featuring sunny outdoor sidewalk seating.",
-                "price_range": "$",
-                "best_for": "breakfast",
-                "lat": 0.0,
-                "lon": 0.0,
-                "opening_hours": "07:30-18:00",
-                "recommendation_reason": "Superb coffee and fresh pastries perfect for starting your morning."
-            },
-            {
-                "name": "La Terrasse Panorama",
-                "cuisine": "Contemporary Fusion",
-                "description": "Rooftop dining destination pairing exquisite seasonal plates with sweeping city views.",
-                "price_range": "$$$",
-                "best_for": "dinner",
-                "lat": 0.0,
-                "lon": 0.0,
-                "opening_hours": "18:30-23:00",
-                "recommendation_reason": "Memorable ambiance ideal for a special dinner."
-            }
+        "featured_restaurants": [],
+        "top_attractions": [],
+        "hidden_gems": [],
+        "general_dining_suggestions": [
+            f"Explore historic dining quarters in {dest} where generational family-run eateries prepare regional specialties.",
+            "Visit bustling central market halls for fresh local morning pastries, cheeses, and casual culinary tastings.",
+            "Look for eateries displaying chalkboard daily specials ('dish of the day') for the freshest seasonal ingredients at fair prices.",
+            "Ask local boutique hoteliers or concierges for their personal favorite neighborhood taverns off the main avenues."
         ],
-        "top_attractions": [
-            {
-                "name": f"Historic Old Quarter of {dest}",
-                "type": "historic",
-                "description": "Winding cobblestone avenues, centuries-old facades, and lively street performances.",
-                "lat": 0.0,
-                "lon": 0.0,
-                "estimated_time_hours": 3,
-                "best_time_to_visit": "morning",
-                "crowd_level": "moderate"
-            },
-            {
-                "name": "Central Fine Arts Gallery",
-                "type": "museum",
-                "description": "Curated collection of regional masterworks in an exquisite historic palace.",
-                "lat": 0.0,
-                "lon": 0.0,
-                "estimated_time_hours": 2.5,
-                "best_time_to_visit": "afternoon",
-                "crowd_level": "moderate"
-            }
-        ],
-        "hidden_gems": [
-            {
-                "name": "Secret Courtyard Cloister Garden",
-                "description": "Peaceful historic courtyard tucked behind cathedral walls with stone arches and quiet fountains.",
-                "category": "culture",
-                "lat": 0.0,
-                "lon": 0.0
-            },
-            {
-                "name": "Vintage Artisans Passage",
-                "description": "Covered 19th-century arcade packed with independent antique dealers, printmakers, and tea salons.",
-                "category": "shopping",
-                "lat": 0.0,
-                "lon": 0.0
-            }
+        "general_activity_suggestions": [
+            f"Embark on a self-guided architectural walking loop through the historic avenues of {dest}.",
+            "Discover quiet church courtyards, public gardens, and open plazas for scenic relaxation and people-watching.",
+            "Browse independent artisan studios and local bookshops clustered in heritage districts."
         ],
         "neighborhood_guides": [
             {
-                "name": "Central Historic Core",
-                "vibe": "Walkable, energetic, lined with iconic architecture and lively plazas.",
-                "top_spots": ["Main Plaza", "Cathedral Walk", "Artisan Alley"]
+                "name": f"Historic Central Core of {dest}",
+                "vibe": "Walkable, energetic, lined with landmark architecture, open plazas, and cafes.",
+                "top_spots": ["Central Plaza", "Old Town Hall Quadrangle", "Market Promenade"]
             },
             {
-                "name": "Riverside / Canal Promenade",
-                "vibe": "Relaxed and scenic with shaded terraces, book stalls, and sunset viewing spots.",
-                "top_spots": ["Promenade Gardens", "Pedestrian Bridge", "Open-Air Terraces"]
+                "name": "Riverside / Waterfront District",
+                "vibe": "Scenic, pedestrian-friendly with open vistas, park benches, and evening atmosphere.",
+                "top_spots": ["Waterfront Boulevard", "Pedestrian Bridge", "Sunset Terrace"]
             }
         ],
         "local_tips": [
-            "Purchase a transit multi-pass for unlimited metro and tram journeys.",
-            "Many top museums offer late-night openings on Thursdays or discounted entry on first Sundays.",
-            "Reservations are strongly recommended for popular dinner bistros at least 2 days ahead."
+            "Purchase a multi-day transit pass for convenient travel across metro and tram networks.",
+            "Verify museum opening schedules directly with venues as hours may vary seasonally.",
+            "Carry a modest amount of local currency for small artisan market stalls."
         ],
-        "data_source": "OpenStreetMap POI database & Local Discovery Curation",
-        "poi_count_retrieved": 12
+        "api_status_message": "Live establishment discovery (OpenStreetMap Overpass) was unavailable. In strict adherence to TripMind data integrity rules, fictional business names and synthetic coordinates are never fabricated. Curated regional dining and cultural advice is provided instead.",
+        "is_live_data": False,
+        "data_source": "Curated Regional Travel Knowledge (Zero Fabricated Establishments Policy)",
+        "poi_count_retrieved": 0
     }
 
 
@@ -437,9 +380,10 @@ def _generate_budget_analysis(prompt: str) -> Dict[str, Any]:
     except Exception:
         budget = 2500.0
 
-    currency = _extract_field(prompt, r"- Currency:\s*([A-Z]{3})", "USD")
-    if not currency or currency.startswith("{"):
-        currency = "USD"
+    m_curr = re.search(r"Total Budget:\s*[0-9.]+\s*([A-Za-z]{3})", prompt, re.IGNORECASE)
+    if not m_curr:
+        m_curr = re.search(r"amounts should be in\s*([A-Za-z]{3})", prompt, re.IGNORECASE)
+    currency = m_curr.group(1).upper() if m_curr else "USD"
 
     travelers_raw = _extract_field(prompt, r"Number of Travelers:\s*([0-9]+)", "1")
     try:
@@ -580,6 +524,12 @@ def _generate_itinerary(prompt: str) -> Dict[str, Any]:
         dep = datetime.now() + timedelta(days=14)
         duration = 5
 
+    budget_raw = _extract_field(prompt, r"- Budget:\s*([0-9.]+)", "1000")
+    try:
+        daily_est = round(float(budget_raw) / max(duration, 1), 2)
+    except Exception:
+        daily_est = 150.0
+
     days = []
     day_titles = [
         ("Arrival & Old Town Exploration", "Unpack, stroll through the historic cobblestoned core, and enjoy a warm welcome dinner."),
@@ -654,7 +604,7 @@ def _generate_itinerary(prompt: str) -> Dict[str, Any]:
                 "lunch": f"Traditional bistro offering fresh daily prix-fixe lunch specials",
                 "dinner": f"Authentic regional dining at a top-rated neighborhood tavern"
             },
-            "daily_budget_estimate": 110,
+            "daily_budget_estimate": daily_est,
             "transportation": "Walkable city center supplemented by quick metro/tram connections.",
             "notes": summary
         })

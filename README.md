@@ -9,16 +9,18 @@ TripMind AI deploys six specialized AI agents that work concurrently to research
 ## ✨ Features
 
 - **6 Specialized AI Agents** running concurrently via Python asyncio
+- **Agent Execution Transparency** — live tracking of each agent's responsibility, provenance (LLM vs live API vs fallback), data sources, and execution timings
+- **Zero Fabricated Establishments Policy** — verified OpenStreetMap POIs only; never fabricates fake venues or synthetic coordinates
 - **Intelligent Offline Fallback Generator** — instant out-of-the-box demonstration even without API keys
 - **Real-time Agent Dashboard** with live execution status updates
 - **Open-Meteo Integration** — actual weather forecasts, no API key required
 - **OpenStreetMap POI Discovery** — real restaurants and attractions via Overpass API
-- **Frankfurter Currency Conversion** — live exchange rates, free API
+- **Frankfurter Currency Conversion** — live exchange rates with in-memory caching and provenance labelling
 - **Interactive Leaflet Maps** with color-coded POI markers
 - **Recharts Visualizations** for weather and budget data
 - **SQLite Persistence** for saving and revisiting trip plans
-- **Day-by-Day Itinerary** with morning/afternoon/evening breakdown
-- **Transparent AI** — agents clearly flag uncertain or unavailable data
+- **Day-by-Day Itinerary** with morning/afternoon/evening breakdown and geographic clustering
+- **Transparent AI** — agents clearly flag uncertain, estimated, or unavailable data
 
 ---
 
@@ -152,7 +154,7 @@ Edit `backend/.env`:
 AI_PROVIDER=gemini           # "gemini" or "openai"
 GEMINI_API_KEY=your_key      # From https://aistudio.google.com/apikey
 OPENAI_API_KEY=              # Only if AI_PROVIDER=openai
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-3.5-flash-lite
 DATABASE_URL=sqlite+aiosqlite:///./tripmind.db
 CORS_ORIGINS=http://localhost:5173
 LLM_TIMEOUT=90
@@ -191,7 +193,8 @@ TripMind-AI/
 │   ├── tests/
 │   │   ├── test_agents.py        # Agent unit tests
 │   │   ├── test_services.py      # Services & fallback tests
-│   │   └── test_api.py           # FastAPI integration tests
+│   │   ├── test_api.py           # FastAPI integration tests
+│   │   └── test_integrity_and_transparency.py # Zero-fabrication & transparency tests
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/

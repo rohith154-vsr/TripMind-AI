@@ -45,3 +45,4 @@ async def test_itinerary_agent(sample_preferences):
     assert result.get("agent") == "itinerary_planning"
     assert "itinerary_overview" in result
     assert "days" in result
+

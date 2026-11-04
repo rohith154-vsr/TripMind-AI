@@ -155,8 +155,9 @@ async def _run_agent_safe(
     trip_id: str,
     extra_kwargs: dict = None,
 ) -> Dict[str, Any]:
-    """Run a single agent with error handling and status updates."""
+    """Run a single agent with error handling, timing, and status updates."""
     name = config["name"]
+    start_time = datetime.now(timezone.utc)
     try:
         await _update_agent_status(trip_id, name, "running", config["description"])
 
@@ -169,11 +170,29 @@ async def _run_agent_safe(
         else:
             result = await config["module"].run(preferences)
 
+        duration = round((datetime.now(timezone.utc) - start_time).total_seconds(), 2)
+        if isinstance(result, dict) and "metadata" in result:
+            result["metadata"]["execution_duration_sec"] = duration
+
         await _update_agent_status(trip_id, name, "completed", "Completed successfully", result)
         return result
     except Exception as e:
+        duration = round((datetime.now(timezone.utc) - start_time).total_seconds(), 2)
         error_msg = f"Agent failed: {str(e)}"
-        error_result = {"error": error_msg, "agent": name}
+        error_result = {
+            "error": error_msg,
+            "agent": name,
+            "metadata": {
+                "agent_name": name,
+                "display_name": config.get("display_name", name),
+                "responsibility": config.get("description", ""),
+                "source_type": "failed",
+                "data_sources": [],
+                "is_fallback": True,
+                "execution_duration_sec": duration,
+                "errors": [error_msg],
+            }
+        }
         await _update_agent_status(trip_id, name, "failed", error_msg, error_result)
         return error_result
 
@@ -211,27 +230,40 @@ async def orchestrate(
         agent_outputs[config["name"]] = result
 
     # Step 3: Run itinerary agent with other agents' outputs
-    itinerary_config = {
-        "name": "itinerary_planning",
-        "display_name": "Itinerary Planning Agent",
-        "description": "Creating your day-by-day itinerary",
-        "module": itinerary_agent,
-    }
+    itin_start = datetime.now(timezone.utc)
     await _update_agent_status(trip_id, "itinerary_planning", "running", "Creating day-by-day itinerary")
     try:
         itinerary_result = await itinerary_agent.run(
             preferences=preferences,
             agent_outputs=agent_outputs,
         )
+        itin_dur = round((datetime.now(timezone.utc) - itin_start).total_seconds(), 2)
+        if isinstance(itinerary_result, dict) and "metadata" in itinerary_result:
+            itinerary_result["metadata"]["execution_duration_sec"] = itin_dur
+
         await _update_agent_status(trip_id, "itinerary_planning", "completed", "Itinerary created", itinerary_result)
         agent_outputs["itinerary_planning"] = itinerary_result
     except Exception as e:
+        itin_dur = round((datetime.now(timezone.utc) - itin_start).total_seconds(), 2)
         error_msg = f"Itinerary agent failed: {str(e)}"
-        itinerary_result = {"error": error_msg}
+        itinerary_result = {
+            "error": error_msg,
+            "metadata": {
+                "agent_name": "itinerary_planning",
+                "display_name": "Itinerary Planning Agent",
+                "responsibility": "Creating your day-by-day itinerary",
+                "source_type": "failed",
+                "data_sources": [],
+                "is_fallback": True,
+                "execution_duration_sec": itin_dur,
+                "errors": [error_msg],
+            }
+        }
         await _update_agent_status(trip_id, "itinerary_planning", "failed", error_msg, itinerary_result)
         agent_outputs["itinerary_planning"] = itinerary_result
 
     # Step 4: Coordinator synthesizes
+    coord_start = datetime.now(timezone.utc)
     await _update_agent_status(trip_id, "travel_coordinator", "running", "Synthesizing final travel plan")
 
     agents_successful = sum(1 for v in agent_outputs.values() if "error" not in v)
@@ -264,6 +296,18 @@ async def orchestrate(
                 "confidence_level": "low",
             },
         }
+
+    coord_dur = round((datetime.now(timezone.utc) - coord_start).total_seconds(), 2)
+    coordinator_result["metadata"] = {
+        "agent_name": "travel_coordinator",
+        "display_name": "Travel Coordinator Agent",
+        "responsibility": "Orchestrating agents, resolving conflicts, and synthesizing complete travel plan",
+        "source_type": "llm",
+        "data_sources": ["Gemini 3.5 Flash Lite", "Multi-Agent Synthesis"],
+        "is_fallback": "Note: Final synthesis encountered an issue" in coordinator_result.get("executive_summary", ""),
+        "execution_duration_sec": coord_dur,
+        "errors": [],
+    }
 
     await _update_agent_status(trip_id, "travel_coordinator", "completed", "Travel plan synthesized", coordinator_result)
 

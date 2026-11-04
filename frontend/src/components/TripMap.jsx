@@ -19,22 +19,28 @@ const CATEGORY_COLORS = {
   other: '#6b7280',       // gray
 }
 
+const isValidCoord = (lat, lon) => {
+  const latN = parseFloat(lat)
+  const lonN = parseFloat(lon)
+  return !isNaN(latN) && !isNaN(lonN) && (Math.abs(latN) > 0.001 || Math.abs(lonN) > 0.001)
+}
+
 export default function TripMap({ coordinates, pois = [], restaurants = [], attractions = [] }) {
-  if (!coordinates || (!coordinates.lat && !coordinates.lon)) {
+  if (!coordinates || !isValidCoord(coordinates.lat, coordinates.lon)) {
     return (
       <div className="h-64 bg-gray-50 rounded-xl flex items-center justify-center border border-gray-100">
-        <p className="text-gray-400 text-sm">Map unavailable — location not found</p>
+        <p className="text-gray-400 text-sm">Map unavailable — location coordinates not verified</p>
       </div>
     )
   }
 
-  const center = [coordinates.lat, coordinates.lon]
+  const center = [parseFloat(coordinates.lat), parseFloat(coordinates.lon)]
 
-  // Combine all POIs for the map
+  // Combine all verified real POIs for the map (strict coordinates filter)
   const allMarkers = [
-    ...pois.filter(p => p.lat && p.lon).map(p => ({ ...p, source: 'osm' })),
-    ...restaurants.filter(r => r.lat && r.lon).map(r => ({ ...r, category: 'food', source: 'ai' })),
-    ...attractions.filter(a => a.lat && a.lon).map(a => ({ ...a, category: 'attraction', source: 'ai' })),
+    ...pois.filter(p => isValidCoord(p.lat, p.lon)).map(p => ({ ...p, source: 'osm' })),
+    ...restaurants.filter(r => isValidCoord(r.lat, r.lon)).map(r => ({ ...r, category: 'food', source: 'osm' })),
+    ...attractions.filter(a => isValidCoord(a.lat, a.lon)).map(a => ({ ...a, category: 'attraction', source: 'osm' })),
   ]
 
   return (
