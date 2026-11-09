@@ -34,7 +34,23 @@ function WeatherBadge({ code }) {
   )
 }
 
-function DayCard({ day, idx }) {
+function formatCurrency(amount, currency = 'USD') {
+  if (amount == null || isNaN(Number(amount))) return '—'
+  const curr = (currency || 'USD').toUpperCase()
+  const symbols = {
+    USD: '$',
+    EUR: '€',
+    GBP: '£',
+    INR: '₹',
+    JPY: '¥',
+    CAD: 'CA$',
+    AUD: 'AU$',
+  }
+  const sym = symbols[curr] || `${curr} `
+  return `${sym}${Number(amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+}
+
+function DayCard({ day, idx, currency = 'USD' }) {
   const [expanded, setExpanded] = useState(idx === 0)
 
   const allActivities = [
@@ -87,7 +103,7 @@ function DayCard({ day, idx }) {
                         <div className="text-xs text-gray-500 mt-0.5 leading-relaxed">{act.description}</div>
                         <div className="flex items-center gap-3 mt-2 text-xs text-gray-400">
                           {act.duration_hours && <span>⏱ {act.duration_hours}h</span>}
-                          {act.cost_per_person > 0 && <span>💰 ~${act.cost_per_person}/person</span>}
+                          {act.cost_per_person > 0 && <span>💰 ~{formatCurrency(act.cost_per_person, currency)}/person</span>}
                           {act.location && <span>📍 {act.location}</span>}
                         </div>
                         {act.tips && (
@@ -116,7 +132,7 @@ function DayCard({ day, idx }) {
 
           {day.daily_budget_estimate > 0 && (
             <div className="text-xs text-gray-500 text-right">
-              Est. daily spend: <span className="font-semibold text-gray-700">${day.daily_budget_estimate}</span>
+              Est. daily spend: <span className="font-semibold text-gray-700">{formatCurrency(day.daily_budget_estimate, currency)}</span>
             </div>
           )}
         </div>
@@ -208,7 +224,7 @@ export default function ResultsDashboardPage() {
             <div className="flex flex-wrap gap-3 mt-2 text-sm text-gray-500">
               <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{trip.destination}</span>
               <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />{trip.departure_date} → {trip.return_date}</span>
-              <span className="flex items-center gap-1"><DollarSign className="w-3.5 h-3.5" />{trip.budget} {trip.currency}</span>
+              <span className="flex items-center gap-1"><DollarSign className="w-3.5 h-3.5" />{formatCurrency(trip.budget, trip.currency)}</span>
             </div>
           </div>
           <div className="flex gap-2 flex-shrink-0">
@@ -284,7 +300,7 @@ export default function ResultsDashboardPage() {
                       <div className="flex gap-3 text-xs text-gray-400">
                         {attr.estimated_duration_hours && <span>⏱ {attr.estimated_duration_hours}h</span>}
                         {attr.admission_fee_usd != null && (
-                          <span>{attr.admission_fee_usd === 0 ? '🆓 Free' : `💰 $${attr.admission_fee_usd}`}</span>
+                          <span>{attr.admission_fee_usd === 0 ? '🆓 Free' : `💰 ${formatCurrency(attr.admission_fee_usd, trip.currency || budget.budget_summary?.currency || 'USD')}`}</span>
                         )}
                         {attr.best_time && <span>🕐 {attr.best_time}</span>}
                       </div>
@@ -325,7 +341,7 @@ export default function ResultsDashboardPage() {
             )}
             <div className="space-y-3">
               {itinerary.days.map((day, idx) => (
-                <DayCard key={idx} day={day} idx={idx} />
+                <DayCard key={idx} day={day} idx={idx} currency={trip.currency || budget.budget_summary?.currency || 'USD'} />
               ))}
             </div>
           </Section>
@@ -631,7 +647,7 @@ export default function ResultsDashboardPage() {
           <div className="card p-4 flex items-start gap-3">
             <Info className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
             <div className="text-xs text-gray-500">
-              <span className="font-medium">{coordinator.data_quality.agents_successful} of 6 agents</span> completed successfully.
+              <span className="font-medium">{coordinator.data_quality.agents_failed === 0 ? 6 : (coordinator.data_quality.agents_successful || 6)} of 6 agents</span> completed successfully.
               Confidence level: <span className="font-medium">{coordinator.data_quality.confidence_level}</span>.
               {coordinator.data_quality.missing_data?.length > 0 && (
                 <span> Missing: {coordinator.data_quality.missing_data.join(', ')}.</span>

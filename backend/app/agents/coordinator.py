@@ -266,8 +266,9 @@ async def orchestrate(
     coord_start = datetime.now(timezone.utc)
     await _update_agent_status(trip_id, "travel_coordinator", "running", "Synthesizing final travel plan")
 
-    agents_successful = sum(1 for v in agent_outputs.values() if "error" not in v)
-    agents_failed = len(agent_outputs) - agents_successful
+    subagents_successful = sum(1 for v in agent_outputs.values() if "error" not in v)
+    total_agents_successful = subagents_successful + 1  # Including coordinator
+    agents_failed = len(agent_outputs) - subagents_successful
 
     has_map = {k: "error" not in v for k, v in agent_outputs.items()}
 
@@ -278,7 +279,7 @@ async def orchestrate(
         has_local=has_map.get("local_discovery", False),
         has_budget=has_map.get("budget_management", False),
         has_itinerary=has_map.get("itinerary_planning", False),
-        agents_successful=agents_successful,
+        agents_successful=total_agents_successful,
         agents_failed=agents_failed,
     )
 
@@ -291,11 +292,16 @@ async def orchestrate(
             "trip_highlights": [],
             "key_recommendations": [],
             "data_quality": {
-                "agents_successful": agents_successful,
+                "agents_successful": total_agents_successful,
                 "agents_failed": agents_failed,
                 "confidence_level": "low",
             },
         }
+
+    # Ensure data_quality counts coordinator as 6th agent
+    if "data_quality" in coordinator_result:
+        coordinator_result["data_quality"]["agents_successful"] = total_agents_successful
+        coordinator_result["data_quality"]["agents_failed"] = agents_failed
 
     coord_dur = round((datetime.now(timezone.utc) - coord_start).total_seconds(), 2)
     coordinator_result["metadata"] = {

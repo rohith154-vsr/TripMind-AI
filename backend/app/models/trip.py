@@ -1,8 +1,25 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Optional
 from sqlalchemy import Column, String, Text, DateTime, Integer, Float
 from sqlalchemy.sql import func
 from app.database import Base
+
+
+def _format_dt(dt) -> Optional[str]:
+    """Format datetime as strict ISO 8601 UTC string ending in 'Z'."""
+    if not dt:
+        return None
+    if isinstance(dt, str):
+        s = dt.strip()
+        if s.endswith("+00:00"):
+            return s[:-6] + "Z"
+        if not s.endswith("Z") and not ("+" in s[10:] or "-" in s[10:]):
+            return s.replace(" ", "T") + "Z"
+        return s
+    if dt.tzinfo is None:
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class Trip(Base):
@@ -43,8 +60,8 @@ class Trip(Base):
             "result": json.loads(self.result_json or "{}"),
             "status": self.status,
             "error_message": self.error_message,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": _format_dt(self.created_at),
+            "updated_at": _format_dt(self.updated_at),
         }
 
 
@@ -69,6 +86,6 @@ class AgentStatus(Base):
             "status": self.status,
             "message": self.message,
             "result": json.loads(self.result_json or "{}"),
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "started_at": _format_dt(self.started_at),
+            "completed_at": _format_dt(self.completed_at),
         }

@@ -106,7 +106,13 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
             if "Nature" in interests:
                 categories.extend(["leisure=park", "natural=peak"])
 
-            pois = await find_pois(geo["lat"], geo["lon"], radius_m=8000, categories=categories)
+            pois = await find_pois(
+                geo["lat"],
+                geo["lon"],
+                radius_m=8000,
+                categories=categories,
+                destination_name=destination,
+            )
     except Exception:
         pois = []
 
@@ -196,7 +202,7 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
         "agent_name": "local_discovery",
         "display_name": "Local Discovery Agent",
         "responsibility": "Finding authentic local dining and cultural POIs via OpenStreetMap",
-        "source_type": "live_api" if has_live_pois else "fallback",
+        "source_type": "live_api" if has_live_pois else "curated_knowledge",
         "data_sources": ["OpenStreetMap / Overpass API", "Nominatim Geocoding", "Gemini 3.5 Flash Lite"] if has_live_pois else ["Curated Regional Travel Knowledge (Fallback)", "Nominatim Geocoding"],
         "is_fallback": not has_live_pois,
         "errors": [] if has_live_pois else ["OpenStreetMap Overpass POI query returned 0 records"],

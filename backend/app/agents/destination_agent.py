@@ -1,20 +1,27 @@
 """
 Destination Research Agent
 Researches the destination, identifies attractions, and recommends places based on user preferences.
+Enforces strict geographical accuracy, destination classification, and zero fake venue fabrication.
 """
 from typing import Dict, Any
 from app.services.llm_service import llm_service
 from app.services.maps_service import geocode
+from app.services.knowledge_base import classify_destination
 
 SYSTEM_PROMPT = """You are the Destination Research Agent for TripMind AI, a specialized travel intelligence system.
-Your role is to research travel destinations thoroughly and provide accurate, useful information.
-Always respond with structured JSON. Never fabricate specific facts you are unsure about.
-If you don't know something, say so clearly in the data."""
+Your role is to research travel destinations thoroughly and provide accurate, geographically authentic information.
+CRITICAL INTEGRITY RULES:
+1. Accurately identify the destination's country, state, region, and terrain (hill station, coastal, metropolitan, etc.).
+2. Never assume metropolitan infrastructure (subways, metro, trams) for hill stations, small towns, or rural destinations.
+3. Tailor transportation (e.g. mountain railways, local taxis, auto-rickshaws) and regional food culture to the real location.
+4. Always respond with structured JSON. Never fabricate fake attractions or coordinates.
+5. If you are unsure of specific facts, provide verified regional guidance instead of inventing place names."""
 
 AGENT_PROMPT_TEMPLATE = """Research the travel destination for a trip with these preferences:
 
 - Origin: {origin}
 - Destination: {destination}
+- Geographic Context: {geo_context}
 - Travel Style: {travel_style}
 - Interests: {interests}
 - Number of Travelers: {num_travelers}
@@ -24,9 +31,9 @@ Provide a comprehensive destination research report as JSON with this exact stru
 {{
   "destination_overview": {{
     "name": "Full destination name",
-    "country": "Country name",
-    "region": "Region/state/province",
-    "description": "2-3 paragraph overview of the destination",
+    "country": "Accurate country name",
+    "region": "Accurate region/state/district",
+    "description": "2-3 paragraph overview capturing the authentic geography, terrain, and culture",
     "best_time_to_visit": "When is the best time to visit",
     "language": "Primary language spoken",
     "currency": "Local currency name and code",
@@ -35,8 +42,8 @@ Provide a comprehensive destination research report as JSON with this exact stru
   }},
   "top_attractions": [
     {{
-      "name": "Attraction name",
-      "type": "museum|park|landmark|beach|temple|market|etc",
+      "name": "Real attraction name",
+      "type": "museum|park|landmark|beach|temple|garden|viewpoint|lake|market",
       "description": "2-3 sentence description",
       "why_visit": "Why this matches the traveler's interests",
       "estimated_duration_hours": 2,
@@ -57,37 +64,49 @@ Provide a comprehensive destination research report as JSON with this exact stru
   ],
   "neighborhoods": [
     {{
-      "name": "Neighborhood name",
+      "name": "Neighborhood or quarter name",
       "character": "Brief character description",
       "best_for": "What it's best for"
     }}
   ],
   "cultural_tips": ["tip1", "tip2", "tip3"],
   "safety_info": "General safety information for the destination",
-  "getting_around": "How to get around the destination",
+  "getting_around": "Realistic transportation options suited to the actual terrain",
   "must_try_foods": ["food1", "food2", "food3"],
   "research_confidence": "high|medium|low",
   "data_notes": "Any caveats or notes about the information provided"
 }}
 
-Include at least 8 top attractions and 5 activities tailored to the traveler's interests ({interests}) and travel style ({travel_style}).
-Focus on real, well-known places. Do not invent places."""
+Include at least 6 real attractions and 4 activities tailored to {travel_style} travelers interested in {interests}.
+Focus strictly on genuine, well-known places. Do not invent places or fabricate European templates for non-European destinations."""
 
 
 async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     """Execute destination research for the given preferences."""
-    # Get coordinates for the destination
+    destination = preferences["destination"]
+
+    # 1. Geocode destination to obtain country, state, region
     geo_data = None
+    geo_context = "International"
     try:
-        geo_data = await geocode(preferences["destination"])
+        geo_data = await geocode(destination)
+        if geo_data:
+            geo_context = f"{geo_data.get('city') or destination}, {geo_data.get('state') or geo_data.get('county') or ''}, {geo_data.get('country', '')}".strip(", ")
     except Exception as e:
         geo_data = {"error": str(e)}
 
-    # Build the LLM prompt
+    # 2. Check destination classification
+    classification = classify_destination(destination, geo_data)
+    if classification["is_curated"]:
+        curated_info = classification["data"]
+        geo_context = f"{curated_info['name']}, {curated_info['region']}, {curated_info['country']} ({curated_info.get('geography_type', '')})"
+
+    # 3. Build prompt
     interests_str = ", ".join(preferences.get("interests", [])) or "General sightseeing"
     prompt = AGENT_PROMPT_TEMPLATE.format(
         origin=preferences["origin"],
-        destination=preferences["destination"],
+        destination=destination,
+        geo_context=geo_context,
         travel_style=preferences.get("travel_style", "Adventure"),
         interests=interests_str,
         num_travelers=preferences.get("num_travelers", 1),
@@ -97,7 +116,7 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
 
     result = await llm_service.generate_json(prompt, SYSTEM_PROMPT)
 
-    # Attach geocoding data
+    # Attach coordinates
     if geo_data and "error" not in geo_data:
         result["coordinates"] = {
             "lat": geo_data["lat"],
@@ -107,13 +126,22 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     else:
         result["coordinates"] = None
 
-    is_fallback = "Historic Center & Landmark Plaza" in str(result)
+    is_curated = classification["is_curated"]
+    is_fallback = "Curated from verified" in str(result) or "Generated from geographically verified" in str(result)
+
+    source_type = "curated_knowledge" if (is_curated or is_fallback) else "llm"
+    data_sources = ["Nominatim Geocoding"]
+    if source_type == "curated_knowledge":
+        data_sources.append("Curated Regional Travel Knowledge Base")
+    else:
+        data_sources.append("Gemini 3.5 Flash Lite")
+
     result["metadata"] = {
         "agent_name": "destination_research",
         "display_name": "Destination Research Agent",
-        "responsibility": "Destination research, attraction analysis, and cultural orientation",
-        "source_type": "fallback" if is_fallback else "llm",
-        "data_sources": ["Nominatim Geocoding", "Gemini 3.5 Flash Lite" if not is_fallback else "Curated Knowledge Base"],
+        "responsibility": "Destination research, attraction analysis, and regional cultural orientation",
+        "source_type": source_type,
+        "data_sources": data_sources,
         "is_fallback": is_fallback,
         "errors": [geo_data["error"]] if (geo_data and "error" in geo_data) else [],
     }

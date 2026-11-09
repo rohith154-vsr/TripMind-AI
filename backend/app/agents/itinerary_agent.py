@@ -3,32 +3,35 @@ Itinerary Planning Agent
 Creates a detailed, geographically optimized day-by-day itinerary
 using verified insights from destination research, weather intelligence,
 budget management, and local discovery agents.
+Strictly adheres to real destination terrain, correct dates, and currency consistency.
 """
 from typing import Dict, Any, List
+from datetime import datetime, timedelta
 from app.services.llm_service import llm_service
+from app.services.knowledge_base import classify_destination
 
 SYSTEM_PROMPT = """You are the Itinerary Planning Agent for TripMind AI.
 Your role is to create realistic, geographically coherent, day-by-day travel itineraries.
 STRICT ACCURACY RULES:
-1. Use actual discovered locations from the provided agent outputs.
-2. Geographically cluster activities for each day to minimize transit fatigue.
-3. Never schedule the same attraction more than once across different days.
-4. Adhere strictly to the travel dates and duration.
-5. Avoid claiming specific opening hours unless explicitly confirmed; otherwise note 'Typical hours; verify locally'.
-6. Clearly label estimated travel times between activities (e.g. 'Transit: ~15 mins via metro').
-7. Build in buffer time and avoid impossible or exhausting schedules.
-8. Respond with structured JSON only."""
+1. Use real discovered locations from destination research and local discovery outputs.
+2. Geographically cluster activities each day to minimize transit fatigue.
+3. Respect terrain and geography: For hill stations or mountain areas (e.g. Ooty), NEVER suggest metro, subways, trams, grand waterfronts, or European-style promenades. Use mountain railways, local tourist cabs, auto-rickshaws, and scenic walking.
+4. Never schedule the same attraction more than once across different days.
+5. All cost estimates and daily budgets must match the user's requested currency ({currency}).
+6. Adhere strictly to the travel dates and duration. Day 1 is {departure_date}, last day is {return_date}.
+7. Respond with structured JSON only."""
 
 ITINERARY_PROMPT = """Create a comprehensive day-by-day itinerary for this trip.
 
 Trip Details:
 - Origin: {origin}  
-- Destination: {destination}
+- Destination: {destination} ({terrain_note})
 - Departure Date: {departure_date}
 - Return Date: {return_date}
 - Duration: {duration_days} days (travel days included)
 - Number of Travelers: {num_travelers}
 - Budget: {budget} {currency}
+- Expected Daily Budget: {daily_budget_estimate} {currency}/day
 - Travel Style: {travel_style}
 - Interests: {interests}
 
@@ -53,40 +56,40 @@ Create a detailed itinerary as JSON with this structure:
   "days": [
     {{
       "day_number": 1,
-      "date": "YYYY-MM-DD",
+      "date": "{departure_date}",
       "theme": "Arrival & Orientation",
       "weather_note": "Expected weather and outdoor feasibility",
       "morning": {{
-        "time": "08:00 - 12:00",
+        "time": "08:30 - 12:00",
         "activities": [
           {{
-            "time": "09:00",
+            "time": "09:30",
             "name": "Activity name",
-            "type": "attraction|restaurant|transport|leisure|shopping",
+            "type": "attraction|restaurant|transport|leisure|shopping|nature|garden|viewpoint",
             "description": "What to do and see",
             "duration_hours": 2,
-            "cost_per_person": 15,
+            "cost_per_person": 50,
             "location": "Neighborhood or specific venue",
-            "tips": "Practical tip (e.g. Transit: ~15 mins via metro. Typical hours; verify locally)",
+            "tips": "Practical tip (e.g. Local cab or short auto-rickshaw ride. Dress warmly for mountain morning air.)",
             "why_recommended": "Why this suits the traveler's style"
           }}
         ]
       }},
       "afternoon": {{
-        "time": "12:00 - 18:00",
+        "time": "12:30 - 17:00",
         "activities": []
       }},
       "evening": {{
-        "time": "18:00 - 22:00",
+        "time": "17:30 - 21:00",
         "activities": []
       }},
       "meals": {{
-        "breakfast": "Breakfast recommendation or neighborhood bakery style",
-        "lunch": "Lunch recommendation or local cuisine style",
+        "breakfast": "Breakfast recommendation or neighborhood tiffin room",
+        "lunch": "Lunch recommendation or regional cuisine style",
         "dinner": "Dinner recommendation or regional dining quarter"
       }},
-      "daily_budget_estimate": 150,
-      "transportation": "How to get around today",
+      "daily_budget_estimate": {daily_budget_estimate},
+      "transportation": "How to get around today (e.g. Local tourist taxi / auto-rickshaw)",
       "notes": "Any special notes for the day"
     }}
   ],
@@ -112,20 +115,27 @@ Never repeat the same attraction on multiple days."""
 
 async def run(preferences: Dict[str, Any], agent_outputs: Dict[str, Any] = None) -> Dict[str, Any]:
     """Create itinerary using outputs from other agents."""
-    from datetime import datetime
-
     destination = preferences["destination"]
     departure_date = preferences.get("departure_date", "")
     return_date = preferences.get("return_date", "")
+    budget = preferences.get("budget", 15000)
+    currency = preferences.get("currency", "INR").upper()
 
     # Calculate duration
-    duration_days = 7
+    duration_days = 4
     try:
         dep = datetime.strptime(departure_date, "%Y-%m-%d")
         ret = datetime.strptime(return_date, "%Y-%m-%d")
         duration_days = max((ret - dep).days + 1, 1)
     except Exception:
-        pass
+        dep = datetime.now() + timedelta(days=14)
+        departure_date = dep.strftime("%Y-%m-%d")
+        return_date = (dep + timedelta(days=duration_days - 1)).strftime("%Y-%m-%d")
+
+    daily_budget_estimate = round(budget / max(duration_days, 1), 2)
+
+    classification = classify_destination(destination)
+    terrain_note = "Highland Hill Station" if classification["is_hill_station"] else "Metropolitan / Urban" if classification["is_metropolitan"] else "Regional Destination"
 
     # Extract relevant info from other agents
     agent_outputs = agent_outputs or {}
@@ -161,12 +171,14 @@ async def run(preferences: Dict[str, Any], agent_outputs: Dict[str, Any] = None)
     prompt = ITINERARY_PROMPT.format(
         origin=preferences["origin"],
         destination=destination,
+        terrain_note=terrain_note,
         departure_date=departure_date,
         return_date=return_date,
         duration_days=duration_days,
         num_travelers=preferences.get("num_travelers", 1),
-        budget=preferences.get("budget", 1000),
-        currency=preferences.get("currency", "USD"),
+        budget=budget,
+        currency=currency,
+        daily_budget_estimate=daily_budget_estimate,
         travel_style=preferences.get("travel_style", "Adventure"),
         interests=interests_str,
         destination_info=destination_info,
@@ -175,22 +187,23 @@ async def run(preferences: Dict[str, Any], agent_outputs: Dict[str, Any] = None)
     )
 
     try:
-        result = await llm_service.generate_json(prompt, SYSTEM_PROMPT)
+        result = await llm_service.generate_json(prompt, SYSTEM_PROMPT.format(currency=currency, departure_date=departure_date, return_date=return_date))
     except Exception as e:
-        result = {
-            "itinerary_overview": {
-                "total_days": duration_days,
-                "theme": f"Trip to {destination}",
-                "highlights": [],
-                "tips": f"Itinerary generation fallback: {str(e)}",
-            },
-            "days": [],
-        }
+        from app.services.fallback_generator import generate_fallback_for_prompt
+        result = generate_fallback_for_prompt(prompt, "Itinerary Planning Agent")
+
+    # Enforce correct days and daily_budget_estimate
+    if "days" in result:
+        for idx, day in enumerate(result["days"]):
+            day_date = (dep + timedelta(days=idx)).strftime("%Y-%m-%d")
+            day["date"] = day_date
+            day["day_number"] = idx + 1
+            day["daily_budget_estimate"] = daily_budget_estimate
 
     result["trip_duration_days"] = duration_days
     result["agent"] = "itinerary_planning"
 
-    is_fallback = "Complete Discovery" in str(result)
+    is_fallback = "Nilgiri Hill Adventure" in str(result) or "Complete Discovery" in str(result)
     result["metadata"] = {
         "agent_name": "itinerary_planning",
         "display_name": "Itinerary Planning Agent",

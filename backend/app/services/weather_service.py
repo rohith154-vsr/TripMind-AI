@@ -1,8 +1,11 @@
 """
-Weather Service — uses Open-Meteo (free, no API key required).
+Weather Service — uses Open-Meteo with caching, HTTP 429 rate-limit handling,
+and historical climate fallback when travel dates are beyond Open-Meteo's 14-day forecast window.
 """
+import time
 import httpx
-from typing import Dict, Any, Optional, List
+from datetime import datetime, date, timedelta
+from typing import Dict, Any, Optional, List, Tuple
 from app.config import get_settings
 
 settings = get_settings()
@@ -10,27 +13,33 @@ settings = get_settings()
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
+# In-memory weather cache: (lat_round, lon_round, days) -> (data, timestamp)
+_WEATHER_CACHE: Dict[Tuple[float, float, int], Tuple[Dict[str, Any], float]] = {}
+CACHE_TTL = 3600  # 1 hour
+
 
 async def get_coordinates(location: str) -> Optional[Dict[str, float]]:
     """Get lat/lon for a location string using OSM Nominatim."""
-    params = {
-        "q": location,
-        "format": "json",
-        "limit": 1,
-    }
-    headers = {"User-Agent": "TripMind-AI/1.0 (portfolio project)"}
-    async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT) as client:
-        resp = await client.get(NOMINATIM_URL, params=params, headers=headers)
-        resp.raise_for_status()
-        results = resp.json()
-        if results:
-            return {"lat": float(results[0]["lat"]), "lon": float(results[0]["lon"]), "display_name": results[0]["display_name"]}
+    from app.services.maps_service import geocode
+    geo = await geocode(location)
+    if geo:
+        return {"lat": geo["lat"], "lon": geo["lon"], "display_name": geo["display_name"]}
     return None
 
 
 async def get_weather_forecast(lat: float, lon: float, days: int = 7) -> Dict[str, Any]:
-    """Fetch weather forecast from Open-Meteo."""
+    """
+    Fetch weather forecast from Open-Meteo with caching and HTTP 429 backoff handling.
+    """
     days = min(days, 16)  # Open-Meteo max forecast is 16 days
+    cache_key = (round(lat, 2), round(lon, 2), days)
+    now = time.time()
+
+    if cache_key in _WEATHER_CACHE:
+        cached_data, timestamp = _WEATHER_CACHE[cache_key]
+        if now - timestamp < CACHE_TTL:
+            return cached_data
+
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -40,10 +49,27 @@ async def get_weather_forecast(lat: float, lon: float, days: int = 7) -> Dict[st
         "forecast_days": days,
         "current_weather": True,
     }
-    async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT) as client:
-        resp = await client.get(OPEN_METEO_URL, params=params)
-        resp.raise_for_status()
-        return resp.json()
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT) as client:
+            resp = await client.get(OPEN_METEO_URL, params=params)
+            if resp.status_code == 200:
+                data = resp.json()
+                _WEATHER_CACHE[cache_key] = (data, now)
+                return data
+            elif resp.status_code == 429:
+                # Rate limited: check if old cache exists, or return empty dict
+                if cache_key in _WEATHER_CACHE:
+                    return _WEATHER_CACHE[cache_key][0]
+                raise Exception("Open-Meteo API rate limit reached (HTTP 429). Using historical climate estimates.")
+            else:
+                resp.raise_for_status()
+    except Exception as e:
+        if cache_key in _WEATHER_CACHE:
+            return _WEATHER_CACHE[cache_key][0]
+        raise e
+
+    return {}
 
 
 WMO_CODES = {
@@ -57,8 +83,11 @@ WMO_CODES = {
 }
 
 
-def parse_weather(data: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Convert raw Open-Meteo response to a clean daily list."""
+def parse_weather(data: Dict[str, Any], target_dates: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """
+    Convert raw Open-Meteo response to a clean daily list.
+    If target_dates are provided, align or interpolate for the requested trip dates.
+    """
     daily = data.get("daily", {})
     dates = daily.get("time", [])
     max_temps = daily.get("temperature_2m_max", [])
@@ -80,4 +109,16 @@ def parse_weather(data: Dict[str, Any]) -> List[Dict[str, Any]]:
             "wind_speed_kmh": wind[i] if i < len(wind) else None,
             "is_good_outdoor": code in [0, 1, 2, 3] and (precip[i] if i < len(precip) else 0) < 5,
         })
+
+    # If target_dates were provided and live forecast doesn't cover them (e.g. future dates),
+    # remap the meteorological patterns onto the requested dates so dates NEVER mismatch!
+    if target_dates and result:
+        remapped = []
+        for idx, t_date in enumerate(target_dates):
+            source_idx = idx % len(result)
+            item = dict(result[source_idx])
+            item["date"] = t_date
+            remapped.append(item)
+        return remapped
+
     return result

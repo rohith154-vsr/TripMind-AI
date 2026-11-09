@@ -71,6 +71,25 @@ function getSourceBadge(sourceType, isFallback) {
   }
 }
 
+function formatTime(dateStr) {
+  if (!dateStr) return null
+  try {
+    let s = String(dateStr).trim()
+    if (!s) return null
+    if (s.includes(' ') && !s.includes('T')) {
+      s = s.replace(' ', 'T')
+    }
+    if (!s.endsWith('Z') && !/[+-]\d{2}:?\d{2}$/.test(s)) {
+      s = s + 'Z'
+    }
+    const d = new Date(s)
+    if (isNaN(d.getTime())) return null
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  } catch {
+    return null
+  }
+}
+
 export default function AgentCard({ agent }) {
   const status = STATUS_CONFIG[agent.status] || STATUS_CONFIG.waiting
   const AgentIcon = ICONS[agent.icon] || Compass
@@ -158,11 +177,11 @@ export default function AgentCard({ agent }) {
           {/* Timestamps & Execution Duration */}
           <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-400">
             <div className="flex gap-2">
-              {agent.started_at && (
-                <span>Started {new Date(agent.started_at.endsWith('Z') ? agent.started_at : agent.started_at + 'Z').toLocaleTimeString()}</span>
+              {formatTime(agent.started_at) && (
+                <span>Started {formatTime(agent.started_at)}</span>
               )}
-              {agent.completed_at && (
-                <span>· Done {new Date(agent.completed_at.endsWith('Z') ? agent.completed_at : agent.completed_at + 'Z').toLocaleTimeString()}</span>
+              {formatTime(agent.completed_at) && (
+                <span>· Done {formatTime(agent.completed_at)}</span>
               )}
             </div>
             {agent.duration_seconds != null && (
