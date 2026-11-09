@@ -52,6 +52,7 @@ export const agentApi = {
 
 export const healthApi = {
   check: () => api.get('/health'),
+  checkDb: () => api.get('/health/db'),
 }
 
 export default api

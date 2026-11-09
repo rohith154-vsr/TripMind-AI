@@ -124,6 +124,18 @@ class Base(DeclarativeBase):
     pass
 
 
+def register_models():
+    """
+    Explicitly import all SQLAlchemy models so they are registered with Base.metadata.
+    Guarantees table models are discovered before Base.metadata.create_all() is invoked.
+    """
+    import app.models.trip  # noqa: F401
+
+
+# Ensure models are registered with Base.metadata
+register_models()
+
+
 async def get_db():
     async with AsyncSessionLocal() as session:
         try:
@@ -133,5 +145,6 @@ async def get_db():
 
 
 async def init_db():
+    register_models()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

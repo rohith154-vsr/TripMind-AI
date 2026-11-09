@@ -162,19 +162,32 @@ Verify the deployed components in this sequence:
    }
    ```
 
-2. **Database Initialization:**
-   - On initial startup, FastAPI's lifespan event runs `init_db()`.
-   - In Neon Console, check the **Tables** tab under `neondb` to verify that the `trips` table was created.
+2. **Database Connectivity Smoke Test:**
+   ```bash
+   curl https://tripmind-ai-backend.onrender.com/api/health/db
+   ```
+   Expected response:
+   ```json
+   {
+     "status": "healthy",
+     "database": "connected"
+   }
+   ```
+   *Note:* If database credentials or networking fail, this endpoint returns HTTP 503 (`{"status": "unhealthy", "database": "disconnected"}`) without leaking internal exception or credential details.
 
-3. **Interactive API Documentation:**
+3. **Database Initialization:**
+   - On initial startup, FastAPI's lifespan event runs `init_db()`.
+   - In Neon Console, check the **Tables** tab under `neondb` to verify that the `trips` and `agent_statuses` tables were created.
+
+4. **Interactive API Documentation:**
    - Visit `https://tripmind-ai-backend.onrender.com/docs` to inspect OpenAPI endpoints.
 
-4. **Frontend Navigation & Direct Linking:**
+5. **Frontend Navigation & Direct Linking:**
    - Visit `https://tripmind-ai.vercel.app/`
    - Navigate to `/plan`
    - Directly refresh `https://tripmind-ai.vercel.app/saved` to confirm `vercel.json` SPA rewrites function without 404s.
 
-5. **End-to-End Trip Generation:**
+6. **End-to-End Trip Generation:**
    - Submit a test plan on the trip planner form.
    - Verify that the Agent Execution Dashboard connects to the Render backend, displays live agent progress, and stores the completed travel plan in Neon.
 

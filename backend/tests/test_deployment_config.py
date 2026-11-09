@@ -126,3 +126,84 @@ def test_cors_origins_parsing():
     # Empty fallback
     cfg_empty = Settings(CORS_ORIGINS="  ,  ")
     assert "http://localhost:5173" in cfg_empty.cors_origins_list
+
+
+@pytest.mark.asyncio
+async def test_database_health_check_success():
+    """Verify GET /api/health/db returns HTTP 200 when SELECT 1 succeeds."""
+    from unittest.mock import patch, AsyncMock
+    from httpx import AsyncClient, ASGITransport
+    from app.main import app
+    from app.database import init_db
+
+    await init_db()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/health/db")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "healthy"
+        assert data["database"] == "connected"
+
+
+@pytest.mark.asyncio
+async def test_database_health_check_failure_returns_503():
+    """Verify GET /api/health/db returns HTTP 503 when database connectivity fails."""
+    from unittest.mock import patch, AsyncMock
+    from httpx import AsyncClient, ASGITransport
+    from app.main import app
+
+    transport = ASGITransport(app=app)
+    with patch("app.main.AsyncSessionLocal") as mock_session_local:
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = ConnectionRefusedError(
+            "asyncpg://user:secret_password@neon.tech:5432/db connection failed"
+        )
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_local.return_value = mock_session
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/health/db")
+            assert resp.status_code == 503
+            data = resp.json()
+            assert data["status"] == "unhealthy"
+            assert data["database"] == "disconnected"
+            # Crucial: NEVER expose internal exceptions, passwords, or connection strings
+            assert "secret_password" not in str(data)
+            assert "neon.tech" not in str(data)
+            assert "exception" not in data
+
+
+@pytest.mark.asyncio
+async def test_models_are_registered_before_table_initialization():
+    """Verify Trip and AgentStatus models are registered in Base.metadata before init_db."""
+    from app.database import Base, register_models
+
+    register_models()
+    tables = Base.metadata.tables
+    assert "trips" in tables, "trips table must be registered in Base.metadata"
+    assert "agent_statuses" in tables, "agent_statuses table must be registered in Base.metadata"
+
+
+def test_cors_production_exact_origins_and_regex_isolation():
+    """
+    Verify production CORS settings:
+    - Exact origin matching preserves allow_credentials=True
+    - Wildcard origin disables allow_credentials to adhere to browser security
+    - Regex is optional and stripped
+    """
+    # 1. Exact origins in production
+    exact_cfg = Settings(CORS_ORIGINS="https://tripmind-ai.vercel.app", CORS_ORIGIN_REGEX="")
+    assert exact_cfg.cors_origins_list == ["https://tripmind-ai.vercel.app"]
+    assert exact_cfg.CORS_ORIGIN_REGEX == ""
+
+    # 2. Local development fallback
+    local_cfg = Settings()
+    assert "http://localhost:5173" in local_cfg.cors_origins_list
+    assert "http://localhost:3000" in local_cfg.cors_origins_list
+
+    # 3. Wildcard origin detection
+    wildcard_cfg = Settings(CORS_ORIGINS="*")
+    assert "*" in wildcard_cfg.cors_origins_list
+

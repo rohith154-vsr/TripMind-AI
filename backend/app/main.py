@@ -1,12 +1,14 @@
 """
 FastAPI Main Application Entry Point
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from sqlalchemy import text
 
 from app.config import get_settings
-from app.database import init_db
+from app.database import init_db, AsyncSessionLocal
 from app.api import trip_routes, agent_routes
 
 settings = get_settings()
@@ -39,8 +41,8 @@ if "*" in settings.cors_origins_list:
     cors_kwargs["allow_credentials"] = False
 
 # Support regex matching for preview deployments (e.g. Vercel preview URLs) if configured
-if settings.CORS_ORIGIN_REGEX:
-    cors_kwargs["allow_origin_regex"] = settings.CORS_ORIGIN_REGEX
+if settings.CORS_ORIGIN_REGEX and settings.CORS_ORIGIN_REGEX.strip():
+    cors_kwargs["allow_origin_regex"] = settings.CORS_ORIGIN_REGEX.strip()
 
 app.add_middleware(
     CORSMiddleware,
@@ -60,6 +62,26 @@ async def health():
         "version": "1.0.0",
         "ai_provider": settings.AI_PROVIDER,
     }
+
+
+@app.get("/api/health/db")
+async def health_db():
+    """Database connectivity health check. Executes a live SELECT 1 probe."""
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        return {
+            "status": "healthy",
+            "database": "connected",
+        }
+    except Exception:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "status": "unhealthy",
+                "database": "disconnected",
+            },
+        )
 
 
 @app.get("/")

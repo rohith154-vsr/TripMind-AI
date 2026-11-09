@@ -14,6 +14,17 @@ async def test_health_endpoint():
         assert "TripMind AI Backend" in data["service"]
 
 @pytest.mark.asyncio
+async def test_health_db_endpoint():
+    await init_db()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/health/db")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert data["database"] == "connected"
+
+@pytest.mark.asyncio
 async def test_trip_list_endpoint():
     await init_db()
     transport = ASGITransport(app=app)
