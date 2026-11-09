@@ -149,6 +149,89 @@ def _find_matching_osm_poi(
     return None
 
 
+def _is_food_poi(poi: Dict[str, Any]) -> bool:
+    """
+    Check if an OSM POI is explicitly classified as a food/dining establishment.
+    Accepts category == 'food' or explicit food/dining types.
+    """
+    if not poi or not isinstance(poi, dict):
+        return False
+    cat = (poi.get("category") or "").lower().strip()
+    ptype = (poi.get("type") or "").lower().strip()
+
+    if cat == "food":
+        return True
+
+    food_types = {
+        "restaurant", "cafe", "fast_food", "bar", "pub", "bistro",
+        "food_court", "bakery", "ice_cream", "biergarten", "diner"
+    }
+    if ptype in food_types:
+        return True
+
+    if any(ft in ptype for ft in ["restaurant", "cafe", "bakery", "fast_food", "pub", "bistro"]):
+        return True
+
+    return False
+
+
+def _is_attraction_poi(poi: Dict[str, Any]) -> bool:
+    """
+    Check if an OSM POI is an explicit attraction, historic, or leisure POI.
+    Strictly excludes food/dining establishments unless independently qualifying.
+    """
+    if not poi or not isinstance(poi, dict):
+        return False
+
+    # Never classify dining establishments as attractions
+    if _is_food_poi(poi):
+        return False
+
+    cat = (poi.get("category") or "").lower().strip()
+    ptype = (poi.get("type") or "").lower().strip()
+
+    if cat in ("attraction", "historic", "leisure", "tourism"):
+        return True
+
+    attraction_types = {
+        "attraction", "museum", "viewpoint", "artwork", "gallery",
+        "theme_park", "zoo", "monument", "memorial", "castle",
+        "ruins", "archaeological_site", "park", "nature_reserve",
+        "garden", "historic", "waterfall", "botanical_garden"
+    }
+    if ptype in attraction_types:
+        return True
+
+    if any(at in ptype for at in [
+        "museum", "viewpoint", "monument", "park", "garden",
+        "landmark", "historic", "tourist", "ruins", "memorial"
+    ]):
+        return True
+
+    return False
+
+
+def _has_valid_coords_and_name(item: Dict[str, Any]) -> bool:
+    """Validate required name, latitude, and longitude fields."""
+    if not item or not isinstance(item, dict):
+        return False
+    name = item.get("name")
+    if not name or not isinstance(name, str) or not name.strip():
+        return False
+    lat = item.get("lat")
+    lon = item.get("lon")
+    try:
+        f_lat = float(lat)
+        f_lon = float(lon)
+        if abs(f_lat) < 0.0001 and abs(f_lon) < 0.0001:
+            return False
+        if not (-90.0 <= f_lat <= 90.0 and -180.0 <= f_lon <= 180.0):
+            return False
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     """Find authentic local restaurants and attractions using real OSM data."""
     destination = preferences["destination"]
@@ -240,29 +323,30 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
         valid_restaurants = []
         for r in result.get("featured_restaurants", []):
             matched = _find_matching_osm_poi(r.get("name"), r.get("lat"), r.get("lon"), pois)
-            if matched:
+            if matched and _is_food_poi(matched) and _has_valid_coords_and_name(matched):
                 r["is_verified_osm"] = True
-                r["lat"] = matched["lat"]
-                r["lon"] = matched["lon"]
+                r["lat"] = float(matched["lat"])
+                r["lon"] = float(matched["lon"])
                 r["osm_verified_name"] = matched["name"]
+                r["name"] = matched["name"]
                 valid_restaurants.append(r)
 
         # Preserve legitimate OSM food records if LLM hallucinated establishments
         if not valid_restaurants:
-            food_pois = [p for p in pois if p.get("category") == "food" or "restaurant" in p.get("type", "") or "cafe" in p.get("type", "")]
-            backup_food = food_pois if food_pois else pois[:4]
-            for p in backup_food[:4]:
+            food_pois = [p for p in pois if _is_food_poi(p) and _has_valid_coords_and_name(p)]
+            for p in food_pois[:4]:
                 valid_restaurants.append({
                     "name": p["name"],
                     "cuisine": p.get("cuisine") or "Regional Cuisine",
                     "description": p.get("description") or f"Authentic local establishment in {destination}",
                     "price_range": "$$",
                     "best_for": "lunch|dinner",
-                    "lat": p["lat"],
-                    "lon": p["lon"],
+                    "lat": float(p["lat"]),
+                    "lon": float(p["lon"]),
                     "opening_hours": p.get("opening_hours") or "Standard local hours",
                     "recommendation_reason": "Verified OpenStreetMap establishment in destination area",
                     "is_verified_osm": True,
+                    "osm_verified_name": p["name"],
                 })
         result["featured_restaurants"] = valid_restaurants
 
@@ -270,28 +354,29 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
         valid_attractions = []
         for a in result.get("top_attractions", []):
             matched = _find_matching_osm_poi(a.get("name"), a.get("lat"), a.get("lon"), pois)
-            if matched:
+            if matched and _is_attraction_poi(matched) and _has_valid_coords_and_name(matched):
                 a["is_verified_osm"] = True
-                a["lat"] = matched["lat"]
-                a["lon"] = matched["lon"]
+                a["lat"] = float(matched["lat"])
+                a["lon"] = float(matched["lon"])
                 a["osm_verified_name"] = matched["name"]
+                a["name"] = matched["name"]
                 valid_attractions.append(a)
 
         # Preserve legitimate OSM attraction records if LLM hallucinated attractions
         if not valid_attractions:
-            attr_pois = [p for p in pois if p.get("category") != "food" or "tourism" in p.get("type", "")]
-            backup_attr = attr_pois if attr_pois else pois[:4]
-            for p in backup_attr[:4]:
+            attr_pois = [p for p in pois if _is_attraction_poi(p) and _has_valid_coords_and_name(p)]
+            for p in attr_pois[:4]:
                 valid_attractions.append({
                     "name": p["name"],
                     "type": p.get("type", "attraction"),
-                    "description": p.get("description") or f"Points of interest in {destination}",
-                    "lat": p["lat"],
-                    "lon": p["lon"],
+                    "description": p.get("description") or f"Point of interest in {destination}",
+                    "lat": float(p["lat"]),
+                    "lon": float(p["lon"]),
                     "estimated_time_hours": 2,
                     "best_time_to_visit": "morning",
                     "crowd_level": "moderate",
                     "is_verified_osm": True,
+                    "osm_verified_name": p["name"],
                 })
         result["top_attractions"] = valid_attractions
 
@@ -311,16 +396,37 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     if llm_meta["is_fallback"] and llm_meta.get("error"):
         errors.append(llm_meta["error"])
 
+    # Determine POI provider
+    poi_provider = "OpenStreetMap / Overpass API" if has_live_pois else "Curated Regional Travel Knowledge Base"
+    if has_live_pois and any(p.get("osm_source") == "OpenStreetMap / Nominatim Verified Record" for p in pois):
+        poi_provider = "OpenStreetMap / Nominatim Verified Record"
+
+    # Determine LLM provider label
+    if not llm_meta["is_fallback"]:
+        llm_label = "Google Gemini 3.5 Flash Lite" if llm_meta.get("provider_used") == "gemini" else "OpenAI GPT-4o-mini"
+        if llm_meta.get("model") and llm_meta.get("provider_used") != "gemini":
+            llm_label = f"OpenAI ({llm_meta['model']})"
+    else:
+        llm_label = "Curated Fallback Generator"
+
+    # Distinguish Live OSM + Gemini vs Live OSM + Fallback enrichment
     data_sources = []
     if has_live_pois:
-        data_sources.append("OpenStreetMap / Overpass API")
+        data_sources.append(poi_provider)
         if not llm_meta["is_fallback"]:
-            llm_label = "Google Gemini 3.5 Flash Lite" if llm_meta.get("provider_used") == "gemini" else "OpenAI GPT-4o-mini"
             data_sources.append(llm_label)
-        source_type = "live_api"
+            source_type = "live_api"
+            is_fallback = False
+        else:
+            data_sources.append(f"{llm_label} (External LLM Unavailable)")
+            source_type = "hybrid"
+            is_fallback = True
+        verification_status = "matched_against_osm_records"
     else:
         data_sources.append("Curated Regional Travel Knowledge Base")
         source_type = "curated_knowledge"
+        is_fallback = True
+        verification_status = "unverified_fallback"
 
     if coordinates:
         data_sources.append("Nominatim Geocoding")
@@ -331,8 +437,25 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
         "responsibility": "Finding authentic local dining and cultural POIs via OpenStreetMap",
         "source_type": source_type,
         "data_sources": data_sources,
-        "is_fallback": (not has_live_pois) or llm_meta["is_fallback"],
+        "is_fallback": is_fallback,
         "errors": errors,
+        "poi_provenance": {
+            "provider": poi_provider,
+            "poi_count_retrieved": len(pois),
+            "has_live_pois": has_live_pois,
+        },
+        "geocoding_provenance": {
+            "provider": "Nominatim Geocoding",
+            "coordinates": coordinates,
+        },
+        "llm_provenance": {
+            "provider_used": llm_meta.get("provider_used"),
+            "provider_label": llm_label,
+            "model": llm_meta.get("model"),
+            "is_fallback": llm_meta.get("is_fallback", False),
+            "error": llm_meta.get("error"),
+        },
+        "verification_status": verification_status,
     }
 
     return result

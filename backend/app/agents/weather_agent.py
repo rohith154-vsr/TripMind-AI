@@ -208,7 +208,6 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
                 "is_good_outdoor": True,
                 "is_live_observation": False,
                 "is_heuristic_estimate": True,
-                "is_historical_estimate": True,  # Backward compatibility alias
                 "data_type": "heuristic_seasonal_estimate",
             })
 

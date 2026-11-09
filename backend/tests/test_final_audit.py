@@ -272,3 +272,345 @@ async def test_currency_conversion_pair_isolation_and_preservation():
     assert unsupported["converted_amount"] == 250.0  # Original preserved
     assert unsupported["conversion_successful"] is False
     assert unsupported["preserved_original"] is True
+
+
+@pytest.mark.asyncio
+async def test_regression_a_osm_parks_museums_no_restaurants_returns_empty_restaurants():
+    """
+    Regression Test A:
+    When OSM returns parks/museums but zero restaurants, featured_restaurants MUST be empty [].
+    No park, museum, or viewpoint can ever be classified as a restaurant substitute.
+    """
+    mock_pois = [
+        {
+            "name": "Botanical Gardens",
+            "lat": 11.4172,
+            "lon": 76.7112,
+            "category": "attraction",
+            "type": "garden",
+            "is_verified_osm": True,
+        },
+        {
+            "name": "Government Museum Ooty",
+            "lat": 11.4190,
+            "lon": 76.7020,
+            "category": "attraction",
+            "type": "museum",
+            "is_verified_osm": True,
+        },
+        {
+            "name": "Doddabetta Peak Viewpoint",
+            "lat": 11.4010,
+            "lon": 76.7350,
+            "category": "leisure",
+            "type": "viewpoint",
+            "is_verified_osm": True,
+        },
+    ]
+
+    prefs = {
+        "destination": "Ooty",
+        "travel_style": "Nature",
+        "interests": ["Nature"],
+        "num_travelers": 2,
+        "budget": 1000,
+    }
+
+    with patch("app.agents.local_discovery_agent.geocode", new_callable=AsyncMock) as mock_geo, \
+         patch("app.agents.local_discovery_agent.find_pois", new_callable=AsyncMock) as mock_find, \
+         patch("app.agents.local_discovery_agent.llm_service.generate_json_with_provenance", new_callable=AsyncMock) as mock_llm:
+        mock_geo.return_value = {"lat": 11.41, "lon": 76.70, "display_name": "Ooty, Tamil Nadu"}
+        mock_find.return_value = mock_pois
+        mock_llm.return_value = (
+            {
+                "featured_restaurants": [
+                    {"name": "Nonexistent Royal Diner", "cuisine": "Multi-Cuisine", "lat": 11.41, "lon": 76.70}
+                ],
+                "top_attractions": [
+                    {"name": "Botanical Gardens", "type": "garden", "lat": 11.4172, "lon": 76.7112}
+                ],
+                "general_dining_suggestions": ["Sample Nilgiri tea and homemade chocolates."],
+                "general_activity_suggestions": ["Walk the garden trails."],
+            },
+            {"provider_used": "gemini", "is_fallback": False, "model": "gemini-2.5-flash"},
+        )
+
+        res = await local_discovery_agent.run(prefs)
+
+        # MUST be empty list - zero food POIs were found in OSM!
+        assert res["featured_restaurants"] == [], "Must be empty when no authentic food POIs exist"
+        for r in res["featured_restaurants"]:
+            assert "garden" not in r["name"].lower()
+            assert "museum" not in r["name"].lower()
+            assert "viewpoint" not in r["name"].lower()
+
+        # Legitimate attraction must be preserved and verified
+        assert len(res["top_attractions"]) >= 1
+        assert res["top_attractions"][0]["name"] == "Botanical Gardens"
+        assert res["top_attractions"][0]["is_verified_osm"] is True
+
+
+@pytest.mark.asyncio
+async def test_regression_b_osm_restaurants_no_attractions_returns_empty_attractions():
+    """
+    Regression Test B:
+    When OSM returns only restaurants and zero attractions, top_attractions MUST be empty [].
+    No restaurant can ever be classified as an attraction substitute.
+    """
+    mock_pois = [
+        {
+            "name": "Earl's Secret Restaurant",
+            "lat": 11.4120,
+            "lon": 76.6980,
+            "category": "food",
+            "type": "restaurant",
+            "cuisine": "Continental",
+            "is_verified_osm": True,
+        },
+        {
+            "name": "Willy's Coffee Pub",
+            "lat": 11.4110,
+            "lon": 76.6970,
+            "category": "food",
+            "type": "cafe",
+            "cuisine": "Bakery",
+            "is_verified_osm": True,
+        },
+    ]
+
+    prefs = {
+        "destination": "Ooty",
+        "travel_style": "Food",
+        "interests": ["Food"],
+        "num_travelers": 2,
+        "budget": 1000,
+    }
+
+    with patch("app.agents.local_discovery_agent.geocode", new_callable=AsyncMock) as mock_geo, \
+         patch("app.agents.local_discovery_agent.find_pois", new_callable=AsyncMock) as mock_find, \
+         patch("app.agents.local_discovery_agent.llm_service.generate_json_with_provenance", new_callable=AsyncMock) as mock_llm:
+        mock_geo.return_value = {"lat": 11.41, "lon": 76.70, "display_name": "Ooty, Tamil Nadu"}
+        mock_find.return_value = mock_pois
+        mock_llm.return_value = (
+            {
+                "featured_restaurants": [
+                    {"name": "Earl's Secret Restaurant", "cuisine": "Continental", "lat": 11.4120, "lon": 76.6980}
+                ],
+                "top_attractions": [
+                    {"name": "Fictional Castle of Ooty", "type": "castle", "lat": 11.41, "lon": 76.70}
+                ],
+                "general_dining_suggestions": ["Enjoy local dining."],
+                "general_activity_suggestions": ["Town walk."],
+            },
+            {"provider_used": "gemini", "is_fallback": False, "model": "gemini-2.5-flash"},
+        )
+
+        res = await local_discovery_agent.run(prefs)
+
+        # MUST be empty list - zero attraction POIs were found in OSM!
+        assert res["top_attractions"] == [], "Must be empty when no authentic attraction POIs exist"
+        for a in res["top_attractions"]:
+            assert "restaurant" not in a["name"].lower()
+            assert "cafe" not in a["name"].lower()
+
+        # Legitimate restaurant must be preserved and verified
+        assert len(res["featured_restaurants"]) >= 1
+        assert res["featured_restaurants"][0]["name"] == "Earl's Secret Restaurant"
+        assert res["featured_restaurants"][0]["is_verified_osm"] is True
+
+
+@pytest.mark.asyncio
+async def test_regression_c_heuristic_weather_flags_and_absence_of_historical_flags():
+    """
+    Regression Test C:
+    When weather estimate is heuristic, is_heuristic_estimate is True,
+    data_type is 'heuristic_seasonal_estimate', and is_historical_estimate is NOT present.
+    """
+    today = date.today()
+    future_dep = (today + timedelta(days=45)).strftime("%Y-%m-%d")
+    future_ret = (today + timedelta(days=48)).strftime("%Y-%m-%d")
+
+    prefs = {
+        "destination": "Ooty",
+        "departure_date": future_dep,
+        "return_date": future_ret,
+    }
+
+    with patch("app.agents.weather_agent.get_coordinates", new_callable=AsyncMock) as mock_geo, \
+         patch("app.agents.weather_agent.llm_service.generate_json_with_provenance", new_callable=AsyncMock) as mock_llm:
+        mock_geo.return_value = {"lat": 11.41, "lon": 76.70, "display_name": "Ooty"}
+        mock_llm.return_value = (
+            {
+                "weather_summary": "Heuristic seasonal estimate.",
+                "overall_rating": "good",
+                "temperature_range": {"avg_high_c": 20.0, "avg_low_c": 11.0},
+                "precipitation_risk": "low",
+                "best_days_outdoor": [future_dep],
+                "days_to_avoid_outdoor": [],
+                "packing_recommendations": ["Layered clothing"],
+                "activity_adjustments": [],
+            },
+            {"provider_used": "gemini", "is_fallback": False, "model": "gemini-2.5-flash"},
+        )
+
+        res = await weather_agent.run(prefs)
+        forecast = res["daily_forecast"]
+        assert len(forecast) == 4
+        for day in forecast:
+            assert day.get("is_heuristic_estimate") is True
+            assert day.get("data_type") == "heuristic_seasonal_estimate"
+            assert "is_historical_estimate" not in day, "is_historical_estimate must be completely removed"
+            assert day.get("is_live_observation") is False
+
+        wp = res["metadata"]["weather_provenance"]
+        assert wp["is_heuristic"] is True
+        assert wp["is_live"] is False
+        assert "historical" not in wp["source_type"].lower()
+
+
+@pytest.mark.asyncio
+async def test_regression_d_local_discovery_provenance_gemini_vs_fallback():
+    """
+    Regression Test D:
+    Local Discovery provenance distinguishes Live OSM + Gemini from Live OSM + Fallback enrichment.
+    """
+    mock_pois = [
+        {
+            "name": "Nahata Sweets",
+            "lat": 11.4102,
+            "lon": 76.6950,
+            "category": "food",
+            "type": "restaurant",
+            "is_verified_osm": True,
+        }
+    ]
+
+    prefs = {
+        "destination": "Ooty",
+        "travel_style": "Culture",
+        "interests": ["Food"],
+    }
+
+    # Case 1: Live OSM + Gemini
+    with patch("app.agents.local_discovery_agent.geocode", new_callable=AsyncMock) as mock_geo, \
+         patch("app.agents.local_discovery_agent.find_pois", new_callable=AsyncMock) as mock_find, \
+         patch("app.agents.local_discovery_agent.llm_service.generate_json_with_provenance", new_callable=AsyncMock) as mock_llm:
+        mock_geo.return_value = {"lat": 11.41, "lon": 76.70, "display_name": "Ooty"}
+        mock_find.return_value = mock_pois
+        mock_llm.return_value = (
+            {
+                "featured_restaurants": [{"name": "Nahata Sweets", "cuisine": "Sweets", "lat": 11.4102, "lon": 76.6950}],
+                "top_attractions": [],
+                "general_dining_suggestions": ["Enjoy sweets"],
+            },
+            {"provider_used": "gemini", "is_fallback": False, "model": "gemini-2.5-flash"},
+        )
+
+        res_live = await local_discovery_agent.run(prefs)
+        meta_live = res_live["metadata"]
+        assert meta_live["source_type"] == "live_api"
+        assert meta_live["is_fallback"] is False
+        assert meta_live["poi_provenance"]["provider"] == "OpenStreetMap / Overpass API"
+        assert meta_live["poi_provenance"]["has_live_pois"] is True
+        assert meta_live["llm_provenance"]["provider_used"] == "gemini"
+        assert meta_live["llm_provenance"]["is_fallback"] is False
+        assert meta_live["verification_status"] == "matched_against_osm_records"
+
+    # Case 2: Live OSM + Fallback LLM enrichment (e.g. Gemini failed)
+    with patch("app.agents.local_discovery_agent.geocode", new_callable=AsyncMock) as mock_geo, \
+         patch("app.agents.local_discovery_agent.find_pois", new_callable=AsyncMock) as mock_find, \
+         patch("app.agents.local_discovery_agent.llm_service.generate_json_with_provenance", new_callable=AsyncMock) as mock_llm:
+        mock_geo.return_value = {"lat": 11.41, "lon": 76.70, "display_name": "Ooty"}
+        mock_find.return_value = mock_pois
+        mock_llm.side_effect = RuntimeError("Gemini quota exceeded")
+
+        res_hybrid = await local_discovery_agent.run(prefs)
+        meta_hybrid = res_hybrid["metadata"]
+        assert meta_hybrid["source_type"] == "hybrid"
+        assert meta_hybrid["is_fallback"] is True
+        assert meta_hybrid["poi_provenance"]["has_live_pois"] is True
+        assert meta_hybrid["llm_provenance"]["is_fallback"] is True
+        assert meta_hybrid["verification_status"] == "matched_against_osm_records"
+        assert "Gemini quota exceeded" in meta_hybrid["errors"][0]
+
+
+def test_regression_e_format_admission_fee_logic():
+    """
+    Regression Test E:
+    Verifies admission fee formatting logic across:
+    - Free admissions
+    - Matching currency pairs (INR -> INR, USD -> USD, EUR -> EUR)
+    - Valid cross-currency conversion (USD -> INR, EUR -> INR, GBP -> INR)
+    - Mismatched conversion objects (rejects applying cross-rate for unrelated currency)
+    - Unavailable exchange rates (preserves original currency label and amount)
+    """
+    def format_admission_fee(attr, trip_currency="USD", conversion=None):
+        if not attr:
+            return None
+        if attr.get("admission_fee") == 0 or attr.get("admission_fee_usd") == 0:
+            return "Free"
+
+        target_curr = (trip_currency or "USD").upper()
+
+        def get_rate(from_curr, to_curr):
+            if not conversion or not isinstance(conversion, dict):
+                return None
+            orig = (conversion.get("original_currency") or "").upper()
+            target = (conversion.get("target_currency") or "").upper()
+            rate = conversion.get("exchange_rate")
+            if orig == from_curr and target == to_curr and isinstance(rate, (int, float)) and rate > 0:
+                return rate
+            return None
+
+        # 1. Explicit native fee & currency
+        if attr.get("admission_fee") is not None and attr.get("admission_fee_currency"):
+            fee_curr = attr["admission_fee_currency"].upper()
+            if fee_curr == target_curr:
+                return f"{fee_curr} {attr['admission_fee']}"
+            rate = get_rate(fee_curr, target_curr)
+            if rate is not None:
+                converted = round(attr["admission_fee"] * rate)
+                return f"{target_curr} {converted} ({fee_curr} {attr['admission_fee']})"
+            return f"{fee_curr} {attr['admission_fee']}"
+
+        # 2. USD fee present
+        if attr.get("admission_fee_usd") is not None:
+            if target_curr == "USD":
+                return f"USD {attr['admission_fee_usd']}"
+            rate = get_rate("USD", target_curr)
+            if rate is not None:
+                converted = round(attr["admission_fee_usd"] * rate)
+                return f"{target_curr} {converted} (USD {attr['admission_fee_usd']})"
+            return f"USD {attr['admission_fee_usd']}"
+
+        return None
+
+    # 1. Free
+    assert format_admission_fee({"admission_fee": 0}) == "Free"
+    assert format_admission_fee({"admission_fee_usd": 0}) == "Free"
+
+    # 2. Matching currency
+    assert format_admission_fee({"admission_fee": 50, "admission_fee_currency": "INR"}, "INR") == "INR 50"
+    assert format_admission_fee({"admission_fee": 15, "admission_fee_currency": "EUR"}, "EUR") == "EUR 15"
+    assert format_admission_fee({"admission_fee_usd": 25}, "USD") == "USD 25"
+
+    # 3. Valid conversion (USD -> INR)
+    conv_usd_inr = {"original_currency": "USD", "target_currency": "INR", "exchange_rate": 86.5}
+    res_converted = format_admission_fee({"admission_fee_usd": 20}, "INR", conv_usd_inr)
+    assert res_converted == "INR 1730 (USD 20)"
+
+    # 4. Valid conversion (EUR -> INR)
+    conv_eur_inr = {"original_currency": "EUR", "target_currency": "INR", "exchange_rate": 93.0}
+    res_eur = format_admission_fee({"admission_fee": 30, "admission_fee_currency": "EUR"}, "INR", conv_eur_inr)
+    assert res_eur == "INR 2790 (EUR 30)"
+
+    # 5. Mismatched pair: attr fee is EUR, but conversion object is USD -> INR
+    res_mismatch = format_admission_fee({"admission_fee": 30, "admission_fee_currency": "EUR"}, "INR", conv_usd_inr)
+    # Must reject applying the USD rate to EUR, and preserve EUR 30!
+    assert res_mismatch == "EUR 30"
+
+    # 6. Unavailable conversion: null conversion
+    res_no_conv = format_admission_fee({"admission_fee": 40, "admission_fee_currency": "GBP"}, "INR", None)
+    assert res_no_conv == "GBP 40"
+
+

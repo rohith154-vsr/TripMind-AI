@@ -150,7 +150,9 @@ async def test_weather_agent_future_trip_uses_historical_estimates():
     expected_dates = [(today + timedelta(days=45 + i)).strftime("%Y-%m-%d") for i in range(4)]
     assert [d["date"] for d in forecast] == expected_dates
     for d in forecast:
-        assert d.get("is_historical_estimate") is True
+        assert d.get("is_heuristic_estimate") is True
+        assert d.get("data_type") == "heuristic_seasonal_estimate"
+        assert "is_historical_estimate" not in d
         assert d.get("is_live_observation") is False
 
 

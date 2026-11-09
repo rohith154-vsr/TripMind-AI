@@ -1,6 +1,7 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
+from app.database import init_db
 
 @pytest.mark.asyncio
 async def test_health_endpoint():
@@ -14,6 +15,7 @@ async def test_health_endpoint():
 
 @pytest.mark.asyncio
 async def test_trip_list_endpoint():
+    await init_db()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/api/trips")
@@ -22,6 +24,7 @@ async def test_trip_list_endpoint():
 
 @pytest.mark.asyncio
 async def test_generate_and_status_flow(sample_preferences):
+    await init_db()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         payload = {"preferences": sample_preferences}
@@ -42,4 +45,5 @@ async def test_generate_and_status_flow(sample_preferences):
         trip_res = await client.get(f"/api/trips/{trip_id}")
         assert trip_res.status_code == 200
         assert trip_res.json()["destination"] == sample_preferences["destination"]
+
 
