@@ -97,24 +97,51 @@ async def get_exchange_rate(from_currency: str, to_currency: str) -> Optional[fl
     return rate
 
 
-async def convert_amount(amount: float, from_currency: str, to_currency: str) -> Optional[Dict[str, Any]]:
+async def convert_amount(
+    amount: float,
+    from_currency: str,
+    to_currency: str,
+    preserve_on_error: bool = True,
+) -> Optional[Dict[str, Any]]:
     """
     Convert an amount and return comprehensive conversion info with provenance.
+    Explicitly tracks source and target currencies.
+    If conversion rate is unavailable and preserve_on_error is True,
+    returns the original amount preserving the original currency.
     """
-    rate, is_live, source_label = await get_exchange_rate_with_metadata(from_currency, to_currency)
+    from_curr = from_currency.upper().strip()
+    to_curr = to_currency.upper().strip()
+    rate, is_live, source_label = await get_exchange_rate_with_metadata(from_curr, to_curr)
+
     if rate is None:
-        return None
+        if not preserve_on_error:
+            return None
+        return {
+            "original_amount": amount,
+            "original_currency": from_curr,
+            "converted_amount": amount,
+            "target_currency": to_curr,
+            "exchange_rate": None,
+            "is_live_rate": False,
+            "is_estimated": False,
+            "rate_source": source_label,
+            "conversion_successful": False,
+            "preserved_original": True,
+            "notes": f"Exchange rate from {from_curr} to {to_curr} unavailable; original currency preserved.",
+        }
 
     return {
         "original_amount": amount,
-        "original_currency": from_currency.upper().strip(),
+        "original_currency": from_curr,
         "converted_amount": round(amount * rate, 2),
-        "target_currency": to_currency.upper().strip(),
+        "target_currency": to_curr,
         "exchange_rate": rate,
         "is_live_rate": is_live,
         "is_estimated": not is_live,
         "rate_source": source_label,
-        "notes": None if is_live else "Estimated rate. Live exchange rate could not be verified.",
+        "conversion_successful": True,
+        "preserved_original": False,
+        "notes": None if is_live else f"Estimated fallback cross-rate ({from_curr}->{to_curr}).",
     }
 
 

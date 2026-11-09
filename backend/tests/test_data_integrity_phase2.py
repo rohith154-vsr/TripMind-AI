@@ -140,7 +140,7 @@ async def test_weather_agent_future_trip_uses_historical_estimates():
     assert result["weather_data_available"] is False
 
     meta = result["metadata"]
-    assert meta["source_type"] == "historical_estimate"
+    assert meta["source_type"] in ("heuristic_seasonal_estimate", "historical_estimate")
     assert meta["is_fallback"] is True
     assert "Open-Meteo Meteorological API (Live Forecast)" not in meta["data_sources"]
 

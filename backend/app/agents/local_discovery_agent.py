@@ -3,8 +3,10 @@ Local Discovery Agent
 Uses OpenStreetMap Overpass API to find authentic restaurants, attractions, and POIs.
 Strictly adheres to the Zero Fabricated Establishments Policy:
 Never fabricates venue names, street addresses, or coordinates.
+Matches and validates any LLM-curated establishments against verified OSM POI records.
 """
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+import re
 from app.services.llm_service import llm_service
 from app.services.maps_service import geocode, find_pois
 
@@ -79,6 +81,72 @@ Return JSON with this exact structure:
     "Practical tip for getting the most out of the destination"
   ]
 }}"""
+
+
+def _normalize_name(name: str) -> str:
+    """Normalize venue name for fuzzy comparison."""
+    if not name or not isinstance(name, str):
+        return ""
+    cleaned = re.sub(r"[^\w\s]", " ", name.lower())
+    return " ".join(cleaned.split())
+
+
+def _find_matching_osm_poi(
+    venue_name: str,
+    venue_lat: Any,
+    venue_lon: Any,
+    osm_pois: List[Dict[str, Any]],
+    coord_tolerance: float = 0.005,
+) -> Optional[Dict[str, Any]]:
+    """
+    Match an establishment against authentic OSM POI records.
+    Strictly prevents marking LLM hallucinations as OSM verified.
+    Requires:
+    1. Valid non-zero numeric coordinates within proximity tolerance (~500m).
+    2. Normalized name correspondence (exact match or bidirectional substring match with length >= 4).
+    """
+    if not venue_name or not isinstance(venue_name, str):
+        return None
+    try:
+        v_lat = float(venue_lat)
+        v_lon = float(venue_lon)
+    except (ValueError, TypeError):
+        return None
+
+    if abs(v_lat) < 0.0001 and abs(v_lon) < 0.0001:
+        return None
+
+    norm_venue = _normalize_name(venue_name)
+    if not norm_venue:
+        return None
+
+    for poi in osm_pois:
+        poi_name = poi.get("name")
+        if not poi_name or not isinstance(poi_name, str):
+            continue
+        try:
+            p_lat = float(poi["lat"])
+            p_lon = float(poi["lon"])
+        except (ValueError, TypeError):
+            continue
+
+        # Proximity check
+        if abs(v_lat - p_lat) > coord_tolerance or abs(v_lon - p_lon) > coord_tolerance:
+            continue
+
+        # Name correspondence
+        norm_poi = _normalize_name(poi_name)
+        if not norm_poi:
+            continue
+
+        if norm_venue == norm_poi or (
+            len(norm_venue) >= 4 and len(norm_poi) >= 4 and (
+                norm_venue in norm_poi or norm_poi in norm_venue
+            )
+        ):
+            return poi
+
+    return None
 
 
 async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
@@ -168,25 +236,63 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
             "and synthetic coordinates are never fabricated. Verified regional dining advice is provided instead."
         )
     else:
-        # Validate that each returned restaurant has valid non-zero coords
+        # Match each restaurant against verified OSM records
         valid_restaurants = []
         for r in result.get("featured_restaurants", []):
-            lat = r.get("lat")
-            lon = r.get("lon")
-            if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
-                if abs(lat) > 0.0001 and abs(lon) > 0.0001:
-                    r["is_verified_osm"] = True
-                    valid_restaurants.append(r)
+            matched = _find_matching_osm_poi(r.get("name"), r.get("lat"), r.get("lon"), pois)
+            if matched:
+                r["is_verified_osm"] = True
+                r["lat"] = matched["lat"]
+                r["lon"] = matched["lon"]
+                r["osm_verified_name"] = matched["name"]
+                valid_restaurants.append(r)
+
+        # Preserve legitimate OSM food records if LLM hallucinated establishments
+        if not valid_restaurants:
+            food_pois = [p for p in pois if p.get("category") == "food" or "restaurant" in p.get("type", "") or "cafe" in p.get("type", "")]
+            backup_food = food_pois if food_pois else pois[:4]
+            for p in backup_food[:4]:
+                valid_restaurants.append({
+                    "name": p["name"],
+                    "cuisine": p.get("cuisine") or "Regional Cuisine",
+                    "description": p.get("description") or f"Authentic local establishment in {destination}",
+                    "price_range": "$$",
+                    "best_for": "lunch|dinner",
+                    "lat": p["lat"],
+                    "lon": p["lon"],
+                    "opening_hours": p.get("opening_hours") or "Standard local hours",
+                    "recommendation_reason": "Verified OpenStreetMap establishment in destination area",
+                    "is_verified_osm": True,
+                })
         result["featured_restaurants"] = valid_restaurants
 
+        # Match each attraction against verified OSM records
         valid_attractions = []
         for a in result.get("top_attractions", []):
-            lat = a.get("lat")
-            lon = a.get("lon")
-            if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
-                if abs(lat) > 0.0001 and abs(lon) > 0.0001:
-                    a["is_verified_osm"] = True
-                    valid_attractions.append(a)
+            matched = _find_matching_osm_poi(a.get("name"), a.get("lat"), a.get("lon"), pois)
+            if matched:
+                a["is_verified_osm"] = True
+                a["lat"] = matched["lat"]
+                a["lon"] = matched["lon"]
+                a["osm_verified_name"] = matched["name"]
+                valid_attractions.append(a)
+
+        # Preserve legitimate OSM attraction records if LLM hallucinated attractions
+        if not valid_attractions:
+            attr_pois = [p for p in pois if p.get("category") != "food" or "tourism" in p.get("type", "")]
+            backup_attr = attr_pois if attr_pois else pois[:4]
+            for p in backup_attr[:4]:
+                valid_attractions.append({
+                    "name": p["name"],
+                    "type": p.get("type", "attraction"),
+                    "description": p.get("description") or f"Points of interest in {destination}",
+                    "lat": p["lat"],
+                    "lon": p["lon"],
+                    "estimated_time_hours": 2,
+                    "best_time_to_visit": "morning",
+                    "crowd_level": "moderate",
+                    "is_verified_osm": True,
+                })
         result["top_attractions"] = valid_attractions
 
         result["is_live_data"] = True

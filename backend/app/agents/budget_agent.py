@@ -208,12 +208,12 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     try:
         if currency != "USD":
             conv = await convert_amount(1.0, "USD", currency)
-            if conv:
+            if conv and conv.get("exchange_rate") is not None:
                 usd_conversion = conv
                 rate_status = "live rate" if conv.get("is_live_rate") else "estimated rate"
                 currency_info = f"1 USD = {conv['exchange_rate']} {currency} ({conv['rate_source']} - {rate_status})"
-        else:
-            currency_info = "Budget is in USD (no conversion required)"
+            else:
+                currency_info = f"Currency conversion reference unavailable; all amounts calculated in native {currency}."
     except Exception as e:
         currency_error = str(e)
         currency_info = f"Currency conversion reference: {currency_error}"

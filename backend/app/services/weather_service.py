@@ -1,6 +1,6 @@
 """
 Weather Service — uses Open-Meteo with caching, HTTP 429 rate-limit handling,
-and historical climate fallback when travel dates are beyond Open-Meteo's 14-day forecast window.
+and seasonal heuristic estimates when travel dates are beyond Open-Meteo's forecast window.
 """
 import time
 import httpx
@@ -18,6 +18,31 @@ _WEATHER_CACHE: Dict[Tuple[float, float, int], Tuple[Dict[str, Any], float]] = {
 CACHE_TTL = 3600  # 1 hour
 
 
+class WeatherServiceError(Exception):
+    """Base exception for weather service operations."""
+    def __init__(self, message: str, error_type: str = "api_error"):
+        super().__init__(message)
+        self.error_type = error_type
+
+
+class WeatherRateLimitError(WeatherServiceError):
+    """Raised when Open-Meteo returns HTTP 429 rate limit."""
+    def __init__(self, message: str = "Open-Meteo API rate limit reached (HTTP 429)"):
+        super().__init__(message, error_type="http_429_rate_limit")
+
+
+class WeatherTimeoutError(WeatherServiceError):
+    """Raised when weather API connection times out."""
+    def __init__(self, message: str = "Open-Meteo API connection timed out"):
+        super().__init__(message, error_type="timeout")
+
+
+class WeatherNetworkError(WeatherServiceError):
+    """Raised when network connection to weather API fails."""
+    def __init__(self, message: str = "Open-Meteo API network connection failed"):
+        super().__init__(message, error_type="network_failure")
+
+
 async def get_coordinates(location: str) -> Optional[Dict[str, float]]:
     """Get lat/lon for a location string using OSM Nominatim."""
     from app.services.maps_service import geocode
@@ -29,7 +54,8 @@ async def get_coordinates(location: str) -> Optional[Dict[str, float]]:
 
 async def get_weather_forecast(lat: float, lon: float, days: int = 7) -> Dict[str, Any]:
     """
-    Fetch weather forecast from Open-Meteo with caching and HTTP 429 backoff handling.
+    Fetch weather forecast from Open-Meteo with caching and structured exception handling
+    for HTTP 429, timeouts, and network failures.
     """
     days = min(days, 16)  # Open-Meteo max forecast is 16 days
     cache_key = (round(lat, 2), round(lon, 2), days)
@@ -58,16 +84,25 @@ async def get_weather_forecast(lat: float, lon: float, days: int = 7) -> Dict[st
                 _WEATHER_CACHE[cache_key] = (data, now)
                 return data
             elif resp.status_code == 429:
-                # Rate limited: check if old cache exists, or return empty dict
                 if cache_key in _WEATHER_CACHE:
                     return _WEATHER_CACHE[cache_key][0]
-                raise Exception("Open-Meteo API rate limit reached (HTTP 429). Using historical climate estimates.")
+                raise WeatherRateLimitError()
             else:
                 resp.raise_for_status()
+    except httpx.TimeoutException as e:
+        if cache_key in _WEATHER_CACHE:
+            return _WEATHER_CACHE[cache_key][0]
+        raise WeatherTimeoutError(f"Open-Meteo API connection timed out: {e}") from e
+    except httpx.NetworkError as e:
+        if cache_key in _WEATHER_CACHE:
+            return _WEATHER_CACHE[cache_key][0]
+        raise WeatherNetworkError(f"Open-Meteo API network connection failed: {e}") from e
+    except WeatherServiceError:
+        raise
     except Exception as e:
         if cache_key in _WEATHER_CACHE:
             return _WEATHER_CACHE[cache_key][0]
-        raise e
+        raise WeatherServiceError(str(e), error_type="api_error") from e
 
     return {}
 
@@ -110,6 +145,8 @@ def parse_weather(data: Dict[str, Any], target_dates: Optional[List[str]] = None
             "wind_speed_kmh": wind[i] if i < len(wind) else None,
             "is_good_outdoor": code in [0, 1, 2, 3] and (precip[i] if i < len(precip) else 0) < 5,
             "is_live_observation": True,
+            "is_heuristic_estimate": False,
+            "data_type": "live_forecast",
         }
 
     if target_dates:

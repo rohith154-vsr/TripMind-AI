@@ -50,7 +50,7 @@ function formatCurrency(amount, currency = 'USD') {
   return `${sym}${Number(amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
 }
 
-function formatAdmissionFee(attr, tripCurrency = 'USD', conversionRate = null) {
+function formatAdmissionFee(attr, tripCurrency = 'USD', currencyConversion = null) {
   if (!attr) return null
 
   // Free admissions
@@ -60,19 +60,40 @@ function formatAdmissionFee(attr, tripCurrency = 'USD', conversionRate = null) {
 
   const targetCurr = (tripCurrency || 'USD').toUpperCase()
 
+  // Helper to extract verified conversion rate strictly for this specific currency pair
+  const getVerifiedRate = (fromCurr, toCurr) => {
+    if (!currencyConversion) return null
+    // If currencyConversion is a structured object with source and target
+    if (typeof currencyConversion === 'object' && currencyConversion !== null) {
+      const orig = (currencyConversion.original_currency || '').toUpperCase()
+      const target = (currencyConversion.target_currency || '').toUpperCase()
+      const rate = currencyConversion.exchange_rate
+      if (orig === fromCurr && target === toCurr && typeof rate === 'number' && rate > 0) {
+        return rate
+      }
+      return null // Mismatched pair! Reject applying unrelated exchange rates
+    }
+    // Legacy fallback: if a raw numeric rate was passed, only allow if fromCurr is USD
+    if (typeof currencyConversion === 'number' && currencyConversion > 0 && fromCurr === 'USD') {
+      return currencyConversion
+    }
+    return null
+  }
+
   // 1. If explicit native admission_fee and admission_fee_currency are present
   if (attr.admission_fee != null && attr.admission_fee_currency) {
     const feeCurr = attr.admission_fee_currency.toUpperCase()
     if (feeCurr === targetCurr) {
       return `💰 ${formatCurrency(attr.admission_fee, targetCurr)}`
     }
-    // If source is USD and target is non-USD (e.g. INR/EUR) and conversion rate is available
-    if (feeCurr === 'USD' && conversionRate && conversionRate > 0) {
-      const converted = Math.round(attr.admission_fee * conversionRate)
-      return `💰 ${formatCurrency(converted, targetCurr)} ($${attr.admission_fee} USD)`
+    // Check if conversion rate exists specifically for feeCurr -> targetCurr
+    const rate = getVerifiedRate(feeCurr, targetCurr)
+    if (rate != null) {
+      const converted = Math.round(attr.admission_fee * rate)
+      return `💰 ${formatCurrency(converted, targetCurr)} (${formatCurrency(attr.admission_fee, feeCurr)})`
     }
-    // If different currencies and no conversion rate, preserve original currency clearly
-    return `💰 ${attr.admission_fee} ${feeCurr}`
+    // Preserves original currency clearly if conversion is unavailable or currencies mismatch
+    return `💰 ${formatCurrency(attr.admission_fee, feeCurr)}`
   }
 
   // 2. If admission_fee_usd is present
@@ -80,11 +101,12 @@ function formatAdmissionFee(attr, tripCurrency = 'USD', conversionRate = null) {
     if (targetCurr === 'USD') {
       return `💰 $${attr.admission_fee_usd}`
     }
-    if (conversionRate && conversionRate > 0) {
-      const converted = Math.round(attr.admission_fee_usd * conversionRate)
+    const rate = getVerifiedRate('USD', targetCurr)
+    if (rate != null) {
+      const converted = Math.round(attr.admission_fee_usd * rate)
       return `💰 ${formatCurrency(converted, targetCurr)} ($${attr.admission_fee_usd} USD)`
     }
-    // Never silently prepend local currency symbol to USD numeric values!
+    // Preserves original USD currency if conversion unavailable
     return `💰 $${attr.admission_fee_usd} USD`
   }
 
@@ -345,8 +367,8 @@ export default function ResultsDashboardPage() {
                       <p className="text-xs text-gray-500 leading-relaxed mb-2">{attr.description}</p>
                       <div className="flex gap-3 text-xs text-gray-400">
                         {attr.estimated_duration_hours && <span>⏱ {attr.estimated_duration_hours}h</span>}
-                        {formatAdmissionFee(attr, trip.currency || budget.budget_summary?.currency || 'USD', budget.currency_conversion?.exchange_rate) && (
-                          <span>{formatAdmissionFee(attr, trip.currency || budget.budget_summary?.currency || 'USD', budget.currency_conversion?.exchange_rate)}</span>
+                        {formatAdmissionFee(attr, trip.currency || budget.budget_summary?.currency || 'USD', budget.currency_conversion) && (
+                          <span>{formatAdmissionFee(attr, trip.currency || budget.budget_summary?.currency || 'USD', budget.currency_conversion)}</span>
                         )}
                         {attr.best_time && <span>🕐 {attr.best_time}</span>}
                       </div>

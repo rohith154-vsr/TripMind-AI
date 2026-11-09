@@ -137,9 +137,9 @@ async def test_ooty_weather_dates_and_provenance():
 
     # Verify transparent provenance
     meta = result.get("metadata", {})
-    assert meta.get("source_type") in ("historical_estimate", "fallback", "live_api")
+    assert meta.get("source_type") in ("historical_estimate", "heuristic_seasonal_estimate", "fallback", "live_api")
     data_source_str = " ".join(meta.get("data_sources", []))
-    assert "Historical" in data_source_str or "Open-Meteo" in data_source_str
+    assert "Geography-Based" in data_source_str or "Historical" in data_source_str or "Open-Meteo" in data_source_str
 
 
 @pytest.mark.asyncio
