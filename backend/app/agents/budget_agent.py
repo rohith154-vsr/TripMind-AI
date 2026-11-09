@@ -58,7 +58,7 @@ Provide a detailed budget analysis as JSON with this exact structure:
     "accommodation": {{
       "estimated_total": {hotel_est},
       "per_night": {hotel_per_night},
-      "nights": {duration_days},
+      "nights": {accommodation_nights},
       "recommended_type": "guesthouse|boutique resort|3-star hotel|homestay",
       "notes": "Accommodation recommendations tailored to {destination}"
     }},
@@ -145,12 +145,14 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     travel_style = preferences.get("travel_style", "Adventure")
     interests = preferences.get("interests", [])
 
-    # Calculate duration (inclusive of departure and return days)
+    # Calculate duration (inclusive of departure and return days) and accommodation nights
     duration_days = 4
+    accommodation_nights = 3
     try:
-        dep = datetime.strptime(departure_date, "%Y-%m-%d")
-        ret = datetime.strptime(return_date, "%Y-%m-%d")
+        dep = datetime.strptime(departure_date, "%Y-%m-%d").date()
+        ret = datetime.strptime(return_date, "%Y-%m-%d").date()
         duration_days = max((ret - dep).days + 1, 1)
+        accommodation_nights = max((ret - dep).days, 0)
     except Exception:
         pass
 
@@ -159,18 +161,34 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     budget_per_day = round(budget / duration_days, 2)
     budget_per_person_per_day = round(budget / (num_travelers * duration_days), 2)
 
-    hotel_est = round(budget * 0.38, 2)
-    hotel_per_night = round(hotel_est / duration_days, 2)
-    transport_est = round(budget * 0.15, 2)
+    if accommodation_nights > 0:
+        hotel_est = round(budget * 0.38, 2)
+        hotel_per_night = round(hotel_est / accommodation_nights, 2)
+        food_est = round(budget * 0.24, 2)
+        transport_est = round(budget * 0.14, 2)
+        activities_est = round(budget * 0.10, 2)
+        shopping_est = round(budget * 0.04, 2)
+        emergency_est = round(budget * 0.10, 2)
+    else:
+        # Single-day trip (no overnight accommodation)
+        hotel_est = 0.0
+        hotel_per_night = 0.0
+        food_est = round(budget * 0.40, 2)
+        transport_est = round(budget * 0.25, 2)
+        activities_est = round(budget * 0.20, 2)
+        shopping_est = round(budget * 0.05, 2)
+        emergency_est = round(budget * 0.10, 2)
+
+    # Enforce that all allocations sum EXACTLY to total budget (inclusive of emergency reserve)
+    current_sum = round(hotel_est + transport_est + food_est + activities_est + shopping_est + emergency_est, 2)
+    diff = round(budget - current_sum, 2)
+    emergency_est = round(emergency_est + diff, 2)
+    total_est = round(hotel_est + transport_est + food_est + activities_est + shopping_est + emergency_est, 2)
+
     transport_per_day = round(transport_est / duration_days, 2)
-    food_est = round(budget * 0.25, 2)
     food_per_day_person = round(food_est / (duration_days * num_travelers), 2)
-    activities_est = round(budget * 0.12, 2)
     activities_per_day = round(activities_est / duration_days, 2)
-    shopping_est = round(budget * 0.05, 2)
-    emergency_est = round(budget * 0.10, 2)
-    misc_est = round(budget * 0.05, 2)
-    total_est = round(hotel_est + transport_est + food_est + activities_est + shopping_est + misc_est, 2)
+    misc_est = emergency_est
 
     food_breakfast = round(food_per_day_person * 0.15, 2)
     food_lunch = round(food_per_day_person * 0.35, 2)
@@ -186,7 +204,7 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     # Currency conversion info
     currency_info = ""
     usd_conversion = None
-    currency_data_source = f"Budget in selected currency ({currency})"
+    currency_error = None
     try:
         if currency != "USD":
             conv = await convert_amount(1.0, "USD", currency)
@@ -194,11 +212,11 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
                 usd_conversion = conv
                 rate_status = "live rate" if conv.get("is_live_rate") else "estimated rate"
                 currency_info = f"1 USD = {conv['exchange_rate']} {currency} ({conv['rate_source']} - {rate_status})"
-                currency_data_source = conv['rate_source']
         else:
             currency_info = "Budget is in USD (no conversion required)"
     except Exception as e:
-        currency_info = f"Currency conversion reference: {str(e)}"
+        currency_error = str(e)
+        currency_info = f"Currency conversion reference: {currency_error}"
 
     interests_str = ", ".join(interests) or "General sightseeing"
     prompt = BUDGET_PROMPT.format(
@@ -208,6 +226,7 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
         departure_date=departure_date,
         return_date=return_date,
         duration_days=duration_days,
+        accommodation_nights=accommodation_nights,
         num_travelers=num_travelers,
         budget=budget,
         currency=currency,
@@ -238,8 +257,9 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     try:
-        result = await llm_service.generate_json(prompt, SYSTEM_PROMPT)
+        result, llm_meta = await llm_service.generate_json_with_provenance(prompt, SYSTEM_PROMPT)
     except Exception as e:
+        llm_meta = {"provider_used": "fallback", "is_fallback": True, "error": str(e)}
         result = {
             "budget_summary": {
                 "total_budget": budget,
@@ -255,9 +275,9 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
                 "accommodation": {
                     "estimated_total": hotel_est,
                     "per_night": hotel_per_night,
-                    "nights": duration_days,
-                    "recommended_type": "Heritage resort / guesthouse",
-                    "notes": f"Centrally located stays in {destination} save transport costs."
+                    "nights": accommodation_nights,
+                    "recommended_type": "Heritage resort / guesthouse" if accommodation_nights > 0 else "None (Single-Day Trip)",
+                    "notes": f"Centrally located stays in {destination} save transport costs." if accommodation_nights > 0 else "No accommodation required for single-day itinerary."
                 },
                 "local_transport": {
                     "estimated_total": transport_est,
@@ -280,15 +300,16 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
                 },
                 "emergency_buffer": {
                     "recommended_amount": emergency_est,
-                    "percentage": 10
+                    "percentage": 10,
+                    "is_included_in_total": True
                 },
                 "miscellaneous": {
-                    "estimated_total": misc_est,
-                    "notes": "Tips and mobile data."
+                    "estimated_total": 0.0,
+                    "notes": "Covered within emergency reserve and daily allowances."
                 }
             },
             "total_estimated_cost": total_est,
-            "budget_vs_estimate": {"difference": 0, "status": "on_budget", "percentage_difference": 0},
+            "budget_vs_estimate": {"difference": 0.0, "status": "on_budget", "percentage_difference": 0.0},
             "cost_saving_tips": [
                 {
                     "tip": "Book a full-day tourist taxi package rather than negotiating multiple individual one-way fares.",
@@ -306,7 +327,7 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
             "financial_tips": ["UPI payments and cash are widely accepted."]
         }
 
-    # CRITICAL: Enforce strict mathematical consistency and currency
+    # CRITICAL: Enforce strict mathematical consistency, nights vs days, and emergency reserve inclusion
     summary = result.setdefault("budget_summary", {})
     summary["currency"] = currency
     summary["total_budget"] = budget
@@ -314,18 +335,64 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     summary["budget_per_day"] = budget_per_day
     summary["budget_per_person_per_day"] = budget_per_person_per_day
 
+    eb = result.setdefault("expense_breakdown", {})
+    eb.setdefault("accommodation", {})["estimated_total"] = hotel_est
+    eb["accommodation"]["per_night"] = hotel_per_night
+    eb["accommodation"]["nights"] = accommodation_nights
+    eb.setdefault("local_transport", {})["estimated_total"] = transport_est
+    eb["local_transport"]["per_day"] = transport_per_day
+    eb.setdefault("food", {})["estimated_total"] = food_est
+    eb["food"]["per_day_person"] = food_per_day_person
+    eb.setdefault("activities_attractions", {})["estimated_total"] = activities_est
+    eb["activities_attractions"]["per_day"] = activities_per_day
+    eb.setdefault("shopping_souvenirs", {})["estimated_total"] = shopping_est
+    eb.setdefault("emergency_buffer", {})["recommended_amount"] = emergency_est
+    eb["emergency_buffer"]["percentage"] = 10
+    eb["emergency_buffer"]["is_included_in_total"] = True
+    if "miscellaneous" in eb:
+        eb["miscellaneous"]["estimated_total"] = 0.0
+
+    result["total_estimated_cost"] = total_est
+    result["budget_vs_estimate"] = {"difference": 0.0, "status": "on_budget", "percentage_difference": 0.0}
+
     if usd_conversion:
         result["currency_conversion"] = usd_conversion
 
     result["agent"] = "budget_management"
+
+    # Truthful provenance metadata
+    data_sources = []
+    if currency != "USD" and usd_conversion:
+        data_sources.append(usd_conversion.get("rate_source", f"Frankfurter Currency Exchange API ({currency})"))
+    elif currency == "USD":
+        data_sources.append("Standard USD Reference (No Conversion Required)")
+    else:
+        data_sources.append(f"Standard Currency Baseline ({currency})")
+
+    if not llm_meta["is_fallback"]:
+        llm_label = "Google Gemini 3.5 Flash Lite" if llm_meta.get("provider_used") == "gemini" else "OpenAI GPT-4o-mini"
+        data_sources.append(llm_label)
+        source_type = "hybrid" if (usd_conversion and usd_conversion.get("is_live_rate")) else "llm"
+        is_fallback = False
+    else:
+        data_sources.append("Curated Regional Budget Model (Fallback)")
+        source_type = "live_api" if (usd_conversion and usd_conversion.get("is_live_rate")) else "curated_knowledge"
+        is_fallback = True
+
+    errors = []
+    if currency_error:
+        errors.append(currency_error)
+    if llm_meta["is_fallback"] and llm_meta.get("error"):
+        errors.append(llm_meta["error"])
+
     result["metadata"] = {
         "agent_name": "budget_management",
         "display_name": "Budget Management Agent",
         "responsibility": "Realistic expense breakdown, daily budget allocation, and money-saving guidance",
-        "source_type": "llm",
-        "data_sources": [f"Frankfurter Currency Exchange API ({currency})", "Gemini 3.5 Flash Lite"],
-        "is_fallback": False,
-        "errors": [],
+        "source_type": source_type,
+        "data_sources": data_sources,
+        "is_fallback": is_fallback,
+        "errors": errors,
     }
 
     return result

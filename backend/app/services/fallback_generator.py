@@ -431,35 +431,53 @@ def _generate_budget_analysis(prompt: str) -> Dict[str, Any]:
     except Exception:
         travelers = 2
 
-    # Check for departure & return date to calculate exact duration
+    # Check for departure & return date to calculate exact duration and accommodation nights
     dep_str = _extract_field(prompt, r"Departure:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", "")
     ret_str = _extract_field(prompt, r"Return:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", "")
     if dep_str and ret_str:
         try:
-            dep = datetime.strptime(dep_str, "%Y-%m-%d")
-            ret = datetime.strptime(ret_str, "%Y-%m-%d")
+            dep = datetime.strptime(dep_str, "%Y-%m-%d").date()
+            ret = datetime.strptime(ret_str, "%Y-%m-%d").date()
             duration_days = max((ret - dep).days + 1, 1)
+            accommodation_nights = max((ret - dep).days, 0)
         except Exception:
             duration_days = 4
+            accommodation_nights = 3
     else:
         days_raw = _extract_field(prompt, r"Duration:\s*([0-9]+)", "4")
         try:
             duration_days = max(int(days_raw), 1)
+            accommodation_nights = max(duration_days - 1, 0)
         except Exception:
             duration_days = 4
+            accommodation_nights = 3
 
     per_person = round(budget / travelers, 2)
     per_day = round(budget / duration_days, 2)
     per_person_per_day = round(budget / (travelers * duration_days), 2)
 
-    # Allocations matching regional travel structure
-    # Accommodation: ~38%, Food: ~25%, Transport: ~15%, Activities: ~12%, Misc: ~10%
-    hotel_est = round(budget * 0.38, 2)
-    food_est = round(budget * 0.25, 2)
-    transport_est = round(budget * 0.15, 2)
-    activities_est = round(budget * 0.12, 2)
-    misc_est = round(budget * 0.10, 2)
-    total_est = round(hotel_est + food_est + transport_est + activities_est + misc_est, 2)
+    if accommodation_nights > 0:
+        hotel_est = round(budget * 0.38, 2)
+        hotel_per_night = round(hotel_est / accommodation_nights, 2)
+        food_est = round(budget * 0.24, 2)
+        transport_est = round(budget * 0.14, 2)
+        activities_est = round(budget * 0.10, 2)
+        shopping_est = round(budget * 0.04, 2)
+        emergency_est = round(budget * 0.10, 2)
+    else:
+        hotel_est = 0.0
+        hotel_per_night = 0.0
+        food_est = round(budget * 0.40, 2)
+        transport_est = round(budget * 0.25, 2)
+        activities_est = round(budget * 0.20, 2)
+        shopping_est = round(budget * 0.05, 2)
+        emergency_est = round(budget * 0.10, 2)
+
+    # Enforce that all allocations sum EXACTLY to total budget (inclusive of emergency reserve)
+    current_sum = round(hotel_est + food_est + transport_est + activities_est + shopping_est + emergency_est, 2)
+    diff = round(budget - current_sum, 2)
+    emergency_est = round(emergency_est + diff, 2)
+    total_est = round(hotel_est + food_est + transport_est + activities_est + shopping_est + emergency_est, 2)
 
     dest = _extract_field(prompt, r"Destination:\s*([^\n\r]+)", "Destination")
     classification = classify_destination(dest)
@@ -467,10 +485,10 @@ def _generate_budget_analysis(prompt: str) -> Dict[str, Any]:
 
     if is_hill:
         transport_options = ["Local Tourist Taxis", "Auto-rickshaws", "Nilgiri Mountain Railway", "Scenic Walking"]
-        hotel_notes = "Centrally located hill-view guesthouse, heritage homestay, or 3-star resort near town center saves commute time."
+        hotel_notes = "Centrally located hill-view guesthouse, heritage homestay, or 3-star resort near town center saves commute time." if accommodation_nights > 0 else "No accommodation required for single-day itinerary."
     else:
         transport_options = ["Local Taxis / Rideshares", "Auto-rickshaws / Public Transit", "City Walking"]
-        hotel_notes = "Centrally located accommodation near key sights minimizes transport costs and travel time."
+        hotel_notes = "Centrally located accommodation near key sights minimizes transport costs and travel time." if accommodation_nights > 0 else "No accommodation required for single-day itinerary."
 
     return {
         "budget_summary": {
@@ -486,9 +504,9 @@ def _generate_budget_analysis(prompt: str) -> Dict[str, Any]:
         "expense_breakdown": {
             "accommodation": {
                 "estimated_total": hotel_est,
-                "per_night": round(hotel_est / duration_days, 2),
-                "nights": duration_days,
-                "recommended_type": "Heritage resort / boutique guesthouse",
+                "per_night": hotel_per_night,
+                "nights": accommodation_nights,
+                "recommended_type": "Heritage resort / boutique guesthouse" if accommodation_nights > 0 else "None (Single-Day Trip)",
                 "notes": hotel_notes
             },
             "flights": {
@@ -518,21 +536,22 @@ def _generate_budget_analysis(prompt: str) -> Dict[str, Any]:
                 "notes": "Covers entry tickets for botanical gardens, boat house rentals, viewpoint observatory admissions, and museum entry fees."
             },
             "shopping_souvenirs": {
-                "estimated_total": round(misc_est * 0.5, 2),
+                "estimated_total": shopping_est,
                 "notes": "Local tea, homemade chocolates, spices, and handcrafted souvenirs."
             },
             "emergency_buffer": {
-                "recommended_amount": round(budget * 0.10, 2),
-                "percentage": 10
+                "recommended_amount": emergency_est,
+                "percentage": 10,
+                "is_included_in_total": True
             },
             "miscellaneous": {
-                "estimated_total": round(misc_est * 0.5, 2),
-                "notes": "Tips, local snacks, emergency buffer, and mobile data."
+                "estimated_total": 0.0,
+                "notes": "Covered within emergency reserve and daily allowances."
             }
         },
         "total_estimated_cost": total_est,
         "budget_vs_estimate": {
-            "difference": round(budget - total_est, 2),
+            "difference": 0.0,
             "status": "on_budget",
             "percentage_difference": 0.0
         },

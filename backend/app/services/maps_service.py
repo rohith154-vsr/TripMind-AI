@@ -9,8 +9,6 @@ import httpx
 import asyncio
 from typing import Dict, Any, Optional, List, Tuple
 from app.config import get_settings
-from app.services.knowledge_base import classify_destination
-
 settings = get_settings()
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -228,25 +226,9 @@ async def find_pois(
     if not pois and destination_name:
         pois = await _search_nominatim_pois(destination_name, lat, lon)
 
-    # 3. Third attempt: If still empty and destination is in Curated Knowledge Base, provide verified POIs
-    if not pois and destination_name:
-        classification = classify_destination(destination_name)
-        if classification["is_curated"]:
-            data = classification["data"]
-            for attr in data.get("top_attractions", [])[:6]:
-                pois.append({
-                    "name": attr["name"],
-                    "lat": round(lat + 0.004, 5),  # Accurate local district vicinity
-                    "lon": round(lon + 0.004, 5),
-                    "category": "attraction",
-                    "type": attr.get("type", "attraction"),
-                    "cuisine": None,
-                    "opening_hours": "09:00 - 18:00",
-                    "website": None,
-                    "description": attr.get("description"),
-                    "is_verified_osm": True,
-                    "osm_source": "Curated Regional Travel Knowledge (Verified Coordinates)",
-                })
+    # Zero Synthetic Coordinates Policy:
+    # If Overpass and Nominatim return 0 live POIs, NEVER synthesize coordinates or offset destination lat/lon.
+    # Return genuine verified OSM POIs only.
 
     if pois:
         _POI_CACHE[cache_key] = (pois[:40], now)

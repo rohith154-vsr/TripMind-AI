@@ -6,7 +6,7 @@ import json
 import re
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 from app.config import get_settings
 from app.services.fallback_generator import generate_fallback_for_prompt
 
@@ -63,13 +63,14 @@ class LLMService:
         else:
             raise ValueError(f"Unsupported AI provider: {self.provider}")
 
-    async def generate_json(self, prompt: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
+    async def generate_json_with_provenance(
+        self, prompt: str, system_prompt: Optional[str] = None
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
-        Generate a JSON response and parse it.
-        If the external AI provider is unavailable, unconfigured, or encounters an error,
-        it automatically falls back to the intelligent domain-specific travel generator.
+        Generate a JSON response and return (data, runtime_provenance_meta).
+        Truthfully records whether external AI (Gemini/OpenAI) was used or if fallback ran,
+        along with provider name, model, and any error message.
         """
-        # Check if API key is configured
         api_configured = (
             (self.provider == "gemini" and _is_api_key_configured(settings.GEMINI_API_KEY)) or
             (self.provider == "openai" and _is_api_key_configured(settings.OPENAI_API_KEY))
@@ -77,22 +78,50 @@ class LLMService:
 
         if not api_configured:
             logger.info("API key unconfigured; using intelligent domain fallback generator.")
-            return generate_fallback_for_prompt(prompt, system_prompt or "")
+            fallback_data = generate_fallback_for_prompt(prompt, system_prompt or "")
+            return fallback_data, {
+                "provider_used": "fallback",
+                "is_fallback": True,
+                "model": None,
+                "error": f"{self.provider.upper()}_API_KEY is not configured",
+            }
 
         full_prompt = prompt + "\n\nIMPORTANT: Respond ONLY with valid JSON. No markdown, no explanation, just JSON."
         try:
             raw = await self.generate(full_prompt, system_prompt)
             cleaned = _clean_json(raw)
             try:
-                return json.loads(cleaned)
+                data = json.loads(cleaned)
             except json.JSONDecodeError:
                 match = re.search(r"\{[\s\S]*\}", cleaned)
                 if match:
-                    return json.loads(match.group())
-                raise ValueError(f"Failed to parse LLM JSON response")
+                    data = json.loads(match.group())
+                else:
+                    raise ValueError("Failed to parse LLM JSON response")
+            return data, {
+                "provider_used": self.provider,
+                "is_fallback": False,
+                "model": settings.GEMINI_MODEL if self.provider == "gemini" else settings.OPENAI_MODEL,
+                "error": None,
+            }
         except Exception as e:
             logger.warning(f"External LLM generation failed ({e}); falling back to intelligent travel generator.")
-            return generate_fallback_for_prompt(prompt, system_prompt or "")
+            fallback_data = generate_fallback_for_prompt(prompt, system_prompt or "")
+            return fallback_data, {
+                "provider_used": "fallback",
+                "is_fallback": True,
+                "model": None,
+                "error": str(e),
+            }
+
+    async def generate_json(self, prompt: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Generate a JSON response and parse it.
+        If the external AI provider is unavailable, unconfigured, or encounters an error,
+        it automatically falls back to the intelligent domain-specific travel generator.
+        """
+        data, _ = await self.generate_json_with_provenance(prompt, system_prompt)
+        return data
 
     async def _generate_gemini(self, prompt: str, system_prompt: Optional[str]) -> str:
         model = self._get_gemini()

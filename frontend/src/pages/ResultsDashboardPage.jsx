@@ -50,6 +50,52 @@ function formatCurrency(amount, currency = 'USD') {
   return `${sym}${Number(amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
 }
 
+function formatAdmissionFee(attr, tripCurrency = 'USD', conversionRate = null) {
+  if (!attr) return null
+
+  // Free admissions
+  if (attr.admission_fee === 0 || attr.admission_fee_usd === 0) {
+    return '🆓 Free'
+  }
+
+  const targetCurr = (tripCurrency || 'USD').toUpperCase()
+
+  // 1. If explicit native admission_fee and admission_fee_currency are present
+  if (attr.admission_fee != null && attr.admission_fee_currency) {
+    const feeCurr = attr.admission_fee_currency.toUpperCase()
+    if (feeCurr === targetCurr) {
+      return `💰 ${formatCurrency(attr.admission_fee, targetCurr)}`
+    }
+    // If source is USD and target is non-USD (e.g. INR/EUR) and conversion rate is available
+    if (feeCurr === 'USD' && conversionRate && conversionRate > 0) {
+      const converted = Math.round(attr.admission_fee * conversionRate)
+      return `💰 ${formatCurrency(converted, targetCurr)} ($${attr.admission_fee} USD)`
+    }
+    // If different currencies and no conversion rate, preserve original currency clearly
+    return `💰 ${attr.admission_fee} ${feeCurr}`
+  }
+
+  // 2. If admission_fee_usd is present
+  if (attr.admission_fee_usd != null) {
+    if (targetCurr === 'USD') {
+      return `💰 $${attr.admission_fee_usd}`
+    }
+    if (conversionRate && conversionRate > 0) {
+      const converted = Math.round(attr.admission_fee_usd * conversionRate)
+      return `💰 ${formatCurrency(converted, targetCurr)} ($${attr.admission_fee_usd} USD)`
+    }
+    // Never silently prepend local currency symbol to USD numeric values!
+    return `💰 $${attr.admission_fee_usd} USD`
+  }
+
+  // 3. Fallback for unlabelled numeric fee
+  if (attr.admission_fee != null) {
+    return `💰 ${formatCurrency(attr.admission_fee, targetCurr)}`
+  }
+
+  return null
+}
+
 function DayCard({ day, idx, currency = 'USD' }) {
   const [expanded, setExpanded] = useState(idx === 0)
 
@@ -299,8 +345,8 @@ export default function ResultsDashboardPage() {
                       <p className="text-xs text-gray-500 leading-relaxed mb-2">{attr.description}</p>
                       <div className="flex gap-3 text-xs text-gray-400">
                         {attr.estimated_duration_hours && <span>⏱ {attr.estimated_duration_hours}h</span>}
-                        {attr.admission_fee_usd != null && (
-                          <span>{attr.admission_fee_usd === 0 ? '🆓 Free' : `💰 ${formatCurrency(attr.admission_fee_usd, trip.currency || budget.budget_summary?.currency || 'USD')}`}</span>
+                        {formatAdmissionFee(attr, trip.currency || budget.budget_summary?.currency || 'USD', budget.currency_conversion?.exchange_rate) && (
+                          <span>{formatAdmissionFee(attr, trip.currency || budget.budget_summary?.currency || 'USD', budget.currency_conversion?.exchange_rate)}</span>
                         )}
                         {attr.best_time && <span>🕐 {attr.best_time}</span>}
                       </div>

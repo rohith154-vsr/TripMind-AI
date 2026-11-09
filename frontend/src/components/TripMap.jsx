@@ -20,9 +20,14 @@ const CATEGORY_COLORS = {
 }
 
 const isValidCoord = (lat, lon) => {
+  if (lat == null || lon == null) return false
   const latN = parseFloat(lat)
   const lonN = parseFloat(lon)
-  return !isNaN(latN) && !isNaN(lonN) && (Math.abs(latN) > 0.001 || Math.abs(lonN) > 0.001)
+  if (isNaN(latN) || isNaN(lonN)) return false
+  if (latN < -90 || latN > 90 || lonN < -180 || lonN > 180) return false
+  // Exclude Null Island (0,0)
+  if (Math.abs(latN) < 0.001 && Math.abs(lonN) < 0.001) return false
+  return true
 }
 
 export default function TripMap({ coordinates, pois = [], restaurants = [], attractions = [] }) {
@@ -36,12 +41,23 @@ export default function TripMap({ coordinates, pois = [], restaurants = [], attr
 
   const center = [parseFloat(coordinates.lat), parseFloat(coordinates.lon)]
 
-  // Combine all verified real POIs for the map (strict coordinates filter)
-  const allMarkers = [
-    ...pois.filter(p => isValidCoord(p.lat, p.lon)).map(p => ({ ...p, source: 'osm' })),
-    ...restaurants.filter(r => isValidCoord(r.lat, r.lon)).map(r => ({ ...r, category: 'food', source: 'osm' })),
-    ...attractions.filter(a => isValidCoord(a.lat, a.lon)).map(a => ({ ...a, category: 'attraction', source: 'osm' })),
+  // Strict filter: only display markers that have verified OSM provenance and authentic coordinates
+  const rawMarkers = [
+    ...pois.filter(p => p.is_verified_osm && isValidCoord(p.lat, p.lon)).map(p => ({ ...p, source: 'osm' })),
+    ...restaurants.filter(r => r.is_verified_osm && isValidCoord(r.lat, r.lon)).map(r => ({ ...r, category: 'food', source: 'osm' })),
+    ...attractions.filter(a => a.is_verified_osm && isValidCoord(a.lat, a.lon)).map(a => ({ ...a, category: 'attraction', source: 'osm' })),
   ]
+
+  // Deduplicate markers by normalized name and coordinate pair
+  const seen = new Set()
+  const allMarkers = []
+  for (const m of rawMarkers) {
+    const key = `${(m.name || '').trim().toLowerCase()}_${m.lat?.toFixed(4)}_${m.lon?.toFixed(4)}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      allMarkers.push(m)
+    }
+  }
 
   return (
     <MapContainer

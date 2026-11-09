@@ -187,10 +187,14 @@ async def run(preferences: Dict[str, Any], agent_outputs: Dict[str, Any] = None)
     )
 
     try:
-        result = await llm_service.generate_json(prompt, SYSTEM_PROMPT.format(currency=currency, departure_date=departure_date, return_date=return_date))
+        result, llm_meta = await llm_service.generate_json_with_provenance(
+            prompt,
+            SYSTEM_PROMPT.format(currency=currency, departure_date=departure_date, return_date=return_date)
+        )
     except Exception as e:
         from app.services.fallback_generator import generate_fallback_for_prompt
         result = generate_fallback_for_prompt(prompt, "Itinerary Planning Agent")
+        llm_meta = {"provider_used": "fallback", "is_fallback": True, "error": str(e)}
 
     # Enforce correct days and daily_budget_estimate
     if "days" in result:
@@ -203,14 +207,23 @@ async def run(preferences: Dict[str, Any], agent_outputs: Dict[str, Any] = None)
     result["trip_duration_days"] = duration_days
     result["agent"] = "itinerary_planning"
 
-    is_fallback = "Nilgiri Hill Adventure" in str(result) or "Complete Discovery" in str(result)
+    is_fallback = llm_meta["is_fallback"]
+    errors = [llm_meta["error"]] if (is_fallback and llm_meta.get("error")) else []
+    if not is_fallback:
+        llm_label = "Google Gemini 3.5 Flash Lite" if llm_meta.get("provider_used") == "gemini" else "OpenAI GPT-4o-mini"
+        data_sources = [llm_label, "Synthesized Multi-Agent Intelligence"]
+        source_type = "llm"
+    else:
+        data_sources = ["Curated Itinerary Engine (Fallback)"]
+        source_type = "fallback"
+
     result["metadata"] = {
         "agent_name": "itinerary_planning",
         "display_name": "Itinerary Planning Agent",
         "responsibility": "Generating geographically grouped, non-repeating day-by-day itinerary with realistic travel pacing",
-        "source_type": "fallback" if is_fallback else "llm",
-        "data_sources": ["Gemini 3.5 Flash Lite", "Synthesized Multi-Agent Intelligence"] if not is_fallback else ["Curated Itinerary Engine (Fallback)"],
+        "source_type": source_type,
+        "data_sources": data_sources,
         "is_fallback": is_fallback,
-        "errors": [],
+        "errors": errors,
     }
     return result

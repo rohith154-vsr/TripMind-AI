@@ -80,6 +80,7 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     target_dates = []
     duration_days = 4
     is_live_forecast_window = False
+    forecast_days = 0
 
     try:
         if departure_date and return_date:
@@ -88,13 +89,21 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
             duration_days = max((ret - dep).days + 1, 1)
             target_dates = [(dep + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(duration_days)]
             today = date.today()
-            # Open-Meteo only has live forecast for today to today + 14 days
-            if today <= dep <= (today + timedelta(days=14)):
+            # Calculate offset from today through trip's final date
+            # Open-Meteo supports up to 16 days of forecast starting from today: (ret - today).days + 1 <= 16
+            days_from_today_to_ret = (ret - today).days + 1
+            if dep >= today and 1 <= days_from_today_to_ret <= 16:
                 is_live_forecast_window = True
+                forecast_days = days_from_today_to_ret
+            else:
+                is_live_forecast_window = False
+                forecast_days = 0
     except Exception:
         dep = date.today() + timedelta(days=14)
         duration_days = 4
         target_dates = [(dep + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(duration_days)]
+        is_live_forecast_window = False
+        forecast_days = 0
 
     # Step 1: Geocode destination
     weather_raw = None
@@ -106,26 +115,29 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
         if coords:
             coordinates = {"lat": coords["lat"], "lon": coords["lon"]}
             if is_live_forecast_window:
-                weather_raw = await get_weather_forecast(coords["lat"], coords["lon"], days=min(duration_days + 1, 16))
+                weather_raw = await get_weather_forecast(coords["lat"], coords["lon"], days=forecast_days)
     except Exception as e:
         weather_raw = None
         weather_error = str(e)
 
     # Step 2: Parse weather or generate historical seasonal estimates
     daily_forecast = []
+    weather_available = False
+
     if weather_raw and is_live_forecast_window:
         daily_forecast = parse_weather(weather_raw, target_dates)
-        weather_available = True
-        source_label = "Open-Meteo Meteorological API (Live Forecast)"
-        source_type = "live_api"
-    else:
+        if daily_forecast:
+            weather_available = True
+            source_label = "Open-Meteo Meteorological API (Live Forecast)"
+            source_type = "live_api"
+
+    if not weather_available:
         # Trip is outside live forecast window (e.g. November 2026) or API rate limited
-        weather_available = False
         if not is_live_forecast_window:
-            source_label = "Historical Seasonal Climate Analytics (Dates > 14 days ahead)"
+            source_label = "Historical Seasonal Climate Analytics (Dates > 16 days ahead)"
             source_type = "historical_estimate"
         else:
-            source_label = "Historical Seasonal Climate Analytics (API Throttled / 429)"
+            source_label = "Historical Seasonal Climate Analytics (Open-Meteo API Throttled / 429)"
             source_type = "historical_estimate"
 
         # Generate realistic climate model based on destination geography
@@ -134,6 +146,7 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
         high_c = 19.5 if is_hill else 26.0
         low_c = 10.5 if is_hill else 17.5
 
+        daily_forecast = []
         for i, t_date in enumerate(target_dates):
             daily_forecast.append({
                 "date": t_date,
@@ -147,6 +160,8 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
                 "wind_speed_kmh": 10.5,
                 "travel_advice": "Crisp, pleasant weather ideal for sightseeing." if is_hill else "Warm sunny weather for outdoor landmarks.",
                 "is_good_outdoor": True,
+                "is_live_observation": False,
+                "is_historical_estimate": True,
             })
 
     # Step 3: AI analysis or structured fallback
@@ -194,9 +209,9 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
 
     data_sources = []
     if weather_available:
-        data_sources.append("Open-Meteo Meteorological API (Live)")
+        data_sources.append("Open-Meteo Meteorological API (Live Forecast)")
     else:
-        data_sources.append(source_label)
+        data_sources.extend(["Historical Seasonal Climate Model", "Geographic Terrain Analytics"])
     if coordinates:
         data_sources.append("Nominatim Geocoding")
 

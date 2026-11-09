@@ -86,7 +86,8 @@ WMO_CODES = {
 def parse_weather(data: Dict[str, Any], target_dates: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """
     Convert raw Open-Meteo response to a clean daily list.
-    If target_dates are provided, align or interpolate for the requested trip dates.
+    If target_dates are provided, strictly match actual returned observation dates
+    to the requested dates. Zero cyclic modulo remapping or fake date relabeling.
     """
     daily = data.get("daily", {})
     dates = daily.get("time", [])
@@ -96,10 +97,10 @@ def parse_weather(data: Dict[str, Any], target_dates: Optional[List[str]] = None
     codes = daily.get("weathercode", [])
     wind = daily.get("windspeed_10m_max", [])
 
-    result = []
+    date_dict: Dict[str, Dict[str, Any]] = {}
     for i, d in enumerate(dates):
         code = codes[i] if i < len(codes) else 0
-        result.append({
+        date_dict[d] = {
             "date": d,
             "condition": WMO_CODES.get(code, "Unknown"),
             "weather_code": code,
@@ -108,17 +109,19 @@ def parse_weather(data: Dict[str, Any], target_dates: Optional[List[str]] = None
             "precipitation_mm": precip[i] if i < len(precip) else None,
             "wind_speed_kmh": wind[i] if i < len(wind) else None,
             "is_good_outdoor": code in [0, 1, 2, 3] and (precip[i] if i < len(precip) else 0) < 5,
-        })
+            "is_live_observation": True,
+        }
 
-    # If target_dates were provided and live forecast doesn't cover them (e.g. future dates),
-    # remap the meteorological patterns onto the requested dates so dates NEVER mismatch!
-    if target_dates and result:
-        remapped = []
-        for idx, t_date in enumerate(target_dates):
-            source_idx = idx % len(result)
-            item = dict(result[source_idx])
-            item["date"] = t_date
-            remapped.append(item)
-        return remapped
+    if target_dates:
+        # Strictly match actual Open-Meteo dates to requested trip dates.
+        # If any target date does not exist in Open-Meteo's returned window,
+        # return empty list to trigger genuine fallback rather than fabricating data.
+        matched = []
+        for t_date in target_dates:
+            if t_date in date_dict:
+                matched.append(date_dict[t_date])
+            else:
+                return []
+        return matched
 
-    return result
+    return list(date_dict.values())

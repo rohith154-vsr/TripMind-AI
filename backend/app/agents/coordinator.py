@@ -284,8 +284,9 @@ async def orchestrate(
     )
 
     try:
-        coordinator_result = await llm_service.generate_json(synthesis_prompt, SYSTEM_PROMPT)
+        coordinator_result, coord_meta = await llm_service.generate_json_with_provenance(synthesis_prompt, SYSTEM_PROMPT)
     except Exception as e:
+        coord_meta = {"provider_used": "fallback", "is_fallback": True, "error": str(e)}
         coordinator_result = {
             "trip_title": f"Trip to {preferences.get('destination', 'Unknown')}",
             "executive_summary": f"Your trip plan has been generated. Note: Final synthesis encountered an issue: {str(e)}",
@@ -304,15 +305,26 @@ async def orchestrate(
         coordinator_result["data_quality"]["agents_failed"] = agents_failed
 
     coord_dur = round((datetime.now(timezone.utc) - coord_start).total_seconds(), 2)
+
+    is_fallback = coord_meta["is_fallback"]
+    errors = [coord_meta["error"]] if (is_fallback and coord_meta.get("error")) else []
+    if not is_fallback:
+        llm_label = "Google Gemini 3.5 Flash Lite" if coord_meta.get("provider_used") == "gemini" else "OpenAI GPT-4o-mini"
+        data_sources = [llm_label, "Multi-Agent Synthesis"]
+        source_type = "llm"
+    else:
+        data_sources = ["Multi-Agent Coordination Engine (Fallback)"]
+        source_type = "fallback"
+
     coordinator_result["metadata"] = {
         "agent_name": "travel_coordinator",
         "display_name": "Travel Coordinator Agent",
         "responsibility": "Orchestrating agents, resolving conflicts, and synthesizing complete travel plan",
-        "source_type": "llm",
-        "data_sources": ["Gemini 3.5 Flash Lite", "Multi-Agent Synthesis"],
-        "is_fallback": "Note: Final synthesis encountered an issue" in coordinator_result.get("executive_summary", ""),
+        "source_type": source_type,
+        "data_sources": data_sources,
+        "is_fallback": is_fallback,
         "execution_duration_sec": coord_dur,
-        "errors": [],
+        "errors": errors,
     }
 
     await _update_agent_status(trip_id, "travel_coordinator", "completed", "Travel plan synthesized", coordinator_result)

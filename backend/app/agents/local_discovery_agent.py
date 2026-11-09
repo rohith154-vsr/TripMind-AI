@@ -138,7 +138,7 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     try:
-        result = await llm_service.generate_json(prompt, SYSTEM_PROMPT)
+        result, llm_meta = await llm_service.generate_json_with_provenance(prompt, SYSTEM_PROMPT)
     except Exception as e:
         result = {
             "featured_restaurants": [],
@@ -153,6 +153,7 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
             "neighborhood_guides": [],
             "local_tips": [f"Local discovery note: {str(e)}"],
         }
+        llm_meta = {"provider_used": "fallback", "is_fallback": True, "error": str(e)}
 
     # Step 3: Strict validation against fabricated venues and coordinates
     # If no live POIs were found, NEVER return fabricated venues
@@ -198,14 +199,34 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
     result["agent"] = "local_discovery"
 
     # Transparency metadata block
+    errors = []
+    if not has_live_pois:
+        errors.append("OpenStreetMap Overpass POI query returned 0 records")
+    if llm_meta["is_fallback"] and llm_meta.get("error"):
+        errors.append(llm_meta["error"])
+
+    data_sources = []
+    if has_live_pois:
+        data_sources.append("OpenStreetMap / Overpass API")
+        if not llm_meta["is_fallback"]:
+            llm_label = "Google Gemini 3.5 Flash Lite" if llm_meta.get("provider_used") == "gemini" else "OpenAI GPT-4o-mini"
+            data_sources.append(llm_label)
+        source_type = "live_api"
+    else:
+        data_sources.append("Curated Regional Travel Knowledge Base")
+        source_type = "curated_knowledge"
+
+    if coordinates:
+        data_sources.append("Nominatim Geocoding")
+
     result["metadata"] = {
         "agent_name": "local_discovery",
         "display_name": "Local Discovery Agent",
         "responsibility": "Finding authentic local dining and cultural POIs via OpenStreetMap",
-        "source_type": "live_api" if has_live_pois else "curated_knowledge",
-        "data_sources": ["OpenStreetMap / Overpass API", "Nominatim Geocoding", "Gemini 3.5 Flash Lite"] if has_live_pois else ["Curated Regional Travel Knowledge (Fallback)", "Nominatim Geocoding"],
-        "is_fallback": not has_live_pois,
-        "errors": [] if has_live_pois else ["OpenStreetMap Overpass POI query returned 0 records"],
+        "source_type": source_type,
+        "data_sources": data_sources,
+        "is_fallback": (not has_live_pois) or llm_meta["is_fallback"],
+        "errors": errors,
     }
 
     return result

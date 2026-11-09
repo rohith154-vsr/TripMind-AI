@@ -47,7 +47,9 @@ Provide a comprehensive destination research report as JSON with this exact stru
       "description": "2-3 sentence description",
       "why_visit": "Why this matches the traveler's interests",
       "estimated_duration_hours": 2,
-      "admission_fee_usd": 10,
+      "admission_fee": 50,
+      "admission_fee_currency": "INR",
+      "admission_fee_usd": 1,
       "best_time": "Morning/Afternoon/Evening",
       "insider_tip": "A useful insider tip"
     }}
@@ -114,7 +116,7 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
         return_date=preferences.get("return_date", ""),
     )
 
-    result = await llm_service.generate_json(prompt, SYSTEM_PROMPT)
+    result, llm_meta = await llm_service.generate_json_with_provenance(prompt, SYSTEM_PROMPT)
 
     # Attach coordinates
     if geo_data and "error" not in geo_data:
@@ -127,14 +129,25 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
         result["coordinates"] = None
 
     is_curated = classification["is_curated"]
-    is_fallback = "Curated from verified" in str(result) or "Generated from geographically verified" in str(result)
+    is_fallback = llm_meta["is_fallback"]
 
-    source_type = "curated_knowledge" if (is_curated or is_fallback) else "llm"
+    errors = []
+    if geo_data and "error" in geo_data:
+        errors.append(geo_data["error"])
+    if is_fallback and llm_meta.get("error"):
+        errors.append(llm_meta["error"])
+
     data_sources = ["Nominatim Geocoding"]
-    if source_type == "curated_knowledge":
-        data_sources.append("Curated Regional Travel Knowledge Base")
+    if is_fallback:
+        source_type = "curated_knowledge" if is_curated else "fallback"
+        if is_curated:
+            data_sources.append("Curated Regional Travel Knowledge Base")
+        else:
+            data_sources.append("Curated Regional Travel Intelligence (Fallback Engine)")
     else:
-        data_sources.append("Gemini 3.5 Flash Lite")
+        source_type = "llm"
+        llm_label = "Google Gemini 3.5 Flash Lite" if llm_meta.get("provider_used") == "gemini" else "OpenAI GPT-4o-mini"
+        data_sources.append(llm_label)
 
     result["metadata"] = {
         "agent_name": "destination_research",
@@ -143,7 +156,7 @@ async def run(preferences: Dict[str, Any]) -> Dict[str, Any]:
         "source_type": source_type,
         "data_sources": data_sources,
         "is_fallback": is_fallback,
-        "errors": [geo_data["error"]] if (geo_data and "error" in geo_data) else [],
+        "errors": errors,
     }
 
     result["agent"] = "destination_research"
